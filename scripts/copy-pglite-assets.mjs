@@ -4,7 +4,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const srcDir = join(root, "node_modules/@electric-sql/pglite/dist");
 const files = ["pglite.data", "pglite.wasm", "initdb.wasm"];
-const outs = [join(root, ".vercel/output/functions"), join(root, ".netlify/functions-internal")];
+const outs = [join(root, ".vercel/output/functions")];
 
 function walk(dir, found) {
   if (!existsSync(dir)) return;

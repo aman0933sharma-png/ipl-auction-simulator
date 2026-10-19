@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addPlayer, beginAuction, forceClose, freshRoom, passLot, placeBid, resolveDue, seat, type RoomState } from "./state";
 import { getKind, type AuctionKind } from "./catalog";
+import { insertRoom, loadRoom, saveRoom } from "./bus.server";
 
 const codeSchema = z
   .string()
@@ -38,7 +39,6 @@ function parseState(raw: string | RoomState): RoomState {
 
 async function load(code: string): Promise<Row | null> {
   if (sharedStore()) {
-    const { loadRoom } = await import("./bus.server");
     return loadRoom(code);
   }
   const { getSql } = await import("@/lib/db");
@@ -52,7 +52,6 @@ async function load(code: string): Promise<Row | null> {
 
 async function save(code: string, expected: number, state: RoomState): Promise<boolean> {
   if (sharedStore()) {
-    const { saveRoom } = await import("./bus.server");
     return saveRoom(code, expected, JSON.stringify(state), state.hostId);
   }
   const { getSql } = await import("@/lib/db");
@@ -98,6 +97,12 @@ export const syncRoom = createServerFn({ method: "POST" })
 export const createRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => joinSchema.parse(input))
   .handler(async ({ data }) => {
+    const kind = (data.kind ?? "ipl") as AuctionKind;
+    const host = seat(data.playerId, data.name, data.team, getKind(kind).purse);
+    if (sharedStore()) {
+      const placed = await insertRoom(data.code, host.id, JSON.stringify(freshRoom(data.code, host, kind)));
+      if (placed === "ok") return freshRoom(data.code, host, kind);
+    }
     const existing = await load(data.code);
     if (existing) {
       const state = parseState(existing.state);
@@ -110,11 +115,8 @@ export const createRoom = createServerFn({ method: "POST" })
       if (mine) return resolveDue(state, Date.now());
       throw new Error("Ye room code pehle se use ho raha hai. Doosra code try karo.");
     }
-    const kind = (data.kind ?? "ipl") as AuctionKind;
-    const host = seat(data.playerId, data.name, data.team, getKind(kind).purse);
     const state = freshRoom(data.code, host, kind);
     if (sharedStore()) {
-      const { insertRoom } = await import("./bus.server");
       const placed = await insertRoom(data.code, host.id, JSON.stringify(state));
       if (placed === "ok") return state;
       return mutate(data.code, (s) => addPlayer(s, host));

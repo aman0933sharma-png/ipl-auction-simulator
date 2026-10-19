@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
 import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
 import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
-import type { RoomState } from "@/lib/auction/state";
+import { freshRoom, seat, type RoomState } from "@/lib/auction/state";
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -87,12 +87,13 @@ export function AuctionDesk() {
         /* keep last good snapshot */
       }
     };
-    const id = window.setInterval(pull, 1000);
+    void pull();
+    const id = window.setInterval(pull, room.phase === "lobby" ? 350 : 800);
     return () => {
       stop = true;
       window.clearInterval(id);
     };
-  }, [room?.code, playerId]);
+  }, [room?.code, room?.phase, playerId]);
 
   const draft = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 
@@ -108,14 +109,21 @@ export function AuctionDesk() {
       return;
     }
     setBusy(true);
+    actionRef.current = true;
+    const spec = getKind(kind);
+    const local = freshRoom(draft, seat(playerId, name.trim(), team.trim(), spec.purse), kind);
+    setCode(draft);
+    setRoom(action === "join" ? { ...local, hostId: "", commentary: "Room join ho raha hai..." } : local);
     try {
       const payload = { code: draft, playerId, name: name.trim(), team: team.trim(), kind };
       const next = action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
     } catch (err) {
+      setRoom(null);
       setError(messageOf(err));
     } finally {
+      actionRef.current = false;
       setBusy(false);
     }
   }
