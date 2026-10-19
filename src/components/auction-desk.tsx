@@ -86,7 +86,7 @@ export function AuctionDesk() {
 
   const draft = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 
-  async function enter(kind: "host" | "join") {
+  async function enter(action: "host" | "join") {
     if (!playerId) return;
     setError("");
     if (draft.length < 4) {
@@ -100,7 +100,7 @@ export function AuctionDesk() {
     setBusy(true);
     try {
       const payload = { code: draft, playerId, name: name.trim(), team: team.trim(), kind };
-      const next = kind === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
+      const next = action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
     } catch (err) {
