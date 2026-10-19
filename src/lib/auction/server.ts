@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { getSql } from "@/lib/db";
 import { addPlayer, beginAuction, forceClose, freshRoom, placeBid, resolveDue, seat, type RoomState } from "./state";
 
 const codeSchema = z
@@ -26,12 +25,21 @@ const actSchema = z.object({
 
 type Row = { code: string; host_id: string; version: number; state: string };
 
+function sharedStore() {
+  return !process.env.DATABASE_URL?.trim();
+}
+
 function parseState(raw: string | RoomState): RoomState {
   if (typeof raw === "string") return JSON.parse(raw) as RoomState;
   return raw;
 }
 
 async function load(code: string): Promise<Row | null> {
+  if (sharedStore()) {
+    const { loadRoom } = await import("./bus.server");
+    return loadRoom(code);
+  }
+  const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql.query<Row>(
     "select code, host_id, version, state from auction_rooms where code = $1",
@@ -41,6 +49,11 @@ async function load(code: string): Promise<Row | null> {
 }
 
 async function save(code: string, expected: number, state: RoomState): Promise<boolean> {
+  if (sharedStore()) {
+    const { saveRoom } = await import("./bus.server");
+    return saveRoom(code, expected, JSON.stringify(state), state.hostId);
+  }
+  const { getSql } = await import("@/lib/db");
   const sql = await getSql();
   const rows = await sql.query<{ version: number }>(
     `update auction_rooms
@@ -95,6 +108,13 @@ export const createRoom = createServerFn({ method: "POST" })
     }
     const host = seat(data.playerId, data.name, data.team);
     const state = freshRoom(data.code, host);
+    if (sharedStore()) {
+      const { insertRoom } = await import("./bus.server");
+      const placed = await insertRoom(data.code, host.id, JSON.stringify(state));
+      if (placed === "ok") return state;
+      return mutate(data.code, (s) => addPlayer(s, host));
+    }
+    const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     try {
       await sql.query(
