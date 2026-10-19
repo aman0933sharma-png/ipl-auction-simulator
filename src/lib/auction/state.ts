@@ -1,5 +1,4 @@
 import {
-  BID_MS,
   MAX_PLAYERS,
   getKind,
   type AuctionKind,
@@ -82,7 +81,7 @@ function openLot(state: RoomState, now: number): RoomState {
     phase: "live",
     bid: lot.base,
     leaderId: null,
-    endsAt: now + BID_MS,
+    endsAt: now + rules(state).bidMs,
     passed: [],
     commentary: `${lot.name} aaya hai. Base ${lot.base / 100} crore se shuru.`,
   };
@@ -161,7 +160,7 @@ export function placeBid(state: RoomState, playerId: string, now: number): RoomS
     ...settled,
     bid: nextBid,
     leaderId: playerId,
-    endsAt: now + BID_MS,
+    endsAt: now + rule.bidMs,
     passed: [],
     commentary: `${me.team} ne ${nextBid / 100} crore lagaya.`,
   };
@@ -178,7 +177,7 @@ export function passLot(state: RoomState, playerId: string, now: number): RoomSt
   const next: RoomState = {
     ...settled,
     passed: [...passed, playerId],
-    endsAt: now + BID_MS,
+    endsAt: now + rules(settled).bidMs,
     commentary: `${me.team} ne pass kiya.`,
   };
   const allPassed = next.players.every((p) => p.id === next.leaderId || next.passed.includes(p.id));

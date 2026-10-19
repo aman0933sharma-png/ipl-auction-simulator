@@ -11,8 +11,8 @@ export const PURSE = 12000;
 export const STEP = 25;
 export const MAX_SQUAD = 25;
 export const MAX_OVERSEAS = 8;
-export const BID_MS = 10_000;
-export const EXTEND_MS = 10_000;
+export const BID_MS = 30_000;
+export const EXTEND_MS = 30_000;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 10;
 
@@ -80,6 +80,7 @@ export type KindSpec = {
   teamLabel: string;
   teamHint: string;
   overseas: number | null;
+  bidMs: number;
   lots: Lot[];
 };
 
@@ -134,6 +135,7 @@ export const KINDS: KindSpec[] = [
     teamLabel: "Team name",
     teamHint: "Pahadi XI",
     overseas: 8,
+    bidMs: 30_000,
     lots: LOTS,
   },
   {
@@ -147,6 +149,7 @@ export const KINDS: KindSpec[] = [
     teamLabel: "Garage name",
     teamHint: "Night Garage",
     overseas: null,
+    bidMs: 10_000,
     lots: CARS,
   },
   {
@@ -160,6 +163,7 @@ export const KINDS: KindSpec[] = [
     teamLabel: "Crew name",
     teamHint: "Pahadi Riders",
     overseas: null,
+    bidMs: 10_000,
     lots: BIKES,
   },
 ];
