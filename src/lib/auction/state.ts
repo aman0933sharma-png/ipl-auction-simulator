@@ -1,6 +1,5 @@
 import {
   BID_MS,
-  EXTEND_MS,
   LOTS,
   MAX_OVERSEAS,
   MAX_PLAYERS,
@@ -31,6 +30,7 @@ export type RoomState = {
   bid: number;
   leaderId: string | null;
   endsAt: number;
+  passed: string[];
   commentary: string;
   feed: string[];
 };
@@ -45,6 +45,7 @@ export function freshRoom(code: string, host: Seat): RoomState {
     bid: 0,
     leaderId: null,
     endsAt: 0,
+    passed: [],
     commentary: "Owners join kar rahe hain. Minimum 2 chahiye.",
     feed: [],
   };
@@ -79,6 +80,7 @@ function openLot(state: RoomState, now: number): RoomState {
     bid: lot.base,
     leaderId: null,
     endsAt: now + BID_MS,
+    passed: [],
     commentary: `${lot.name} aaya hai. Base ${lot.base / 100} crore se shuru.`,
   };
 }
@@ -152,8 +154,25 @@ export function placeBid(state: RoomState, playerId: string, now: number): RoomS
     ...settled,
     bid: nextBid,
     leaderId: playerId,
-    endsAt: Math.max(settled.endsAt, now + EXTEND_MS),
+    endsAt: now + BID_MS,
+    passed: [],
     commentary: `${me.team} ne ${nextBid / 100} crore lagaya.`,
+  };
+}
+
+export function passLot(state: RoomState, playerId: string, now: number): RoomState {
+  const settled = resolveDue(state, now);
+  if (settled.phase !== "live") throw new Error("Is lot pe pass band ho chuka hai.");
+  const me = settled.players.find((p) => p.id === playerId);
+  if (!me) throw new Error("Tum is room mein nahi ho.");
+  if (settled.leaderId === playerId) throw new Error("Tum leading ho. Pass nahi kar sakte.");
+  const passed = settled.passed ?? [];
+  if (passed.includes(playerId)) throw new Error("Tum is player pe pass kar chuke ho.");
+  return {
+    ...settled,
+    passed: [...passed, playerId],
+    endsAt: now + BID_MS,
+    commentary: `${me.team} ne pass kiya. 30 second reset.`,
   };
 }
 

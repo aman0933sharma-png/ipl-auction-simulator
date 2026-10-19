@@ -12,8 +12,8 @@ export const PURSE = 12000;
 export const STEP = 25;
 export const MAX_SQUAD = 25;
 export const MAX_OVERSEAS = 8;
-export const BID_MS = 15_000;
-export const EXTEND_MS = 8_000;
+export const BID_MS = 30_000;
+export const EXTEND_MS = 30_000;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 10;
 

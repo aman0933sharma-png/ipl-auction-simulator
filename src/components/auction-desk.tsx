@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
 import { LOTS, MAX_SQUAD, formatCr } from "@/lib/auction/catalog";
-import { bid, closeLot, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
+import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
 import type { RoomState } from "@/lib/auction/state";
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -132,11 +132,11 @@ export function AuctionDesk() {
     }
   }
 
-  async function onClose(modeName: "sell" | "unsold") {
+  async function onPass() {
     if (!room || !playerId) return;
     setError("");
     try {
-      setRoom(await closeLot({ data: { code: room.code, playerId, mode: modeName } }));
+      setRoom(await pass({ data: { code: room.code, playerId } }));
     } catch (err) {
       setError(messageOf(err));
     }
@@ -194,7 +194,7 @@ export function AuctionDesk() {
       now={now}
       error={error}
       onBid={onBid}
-      onClose={onClose}
+      onPass={onPass}
     />
   );
 }
@@ -395,14 +395,17 @@ function Board(props: {
   now: number;
   error: string;
   onBid: () => void;
-  onClose: (mode: "sell" | "unsold") => void;
+  onPass: () => void;
 }) {
   const lot = LOTS[props.room.index];
   const me = props.room.players.find((p) => p.id === props.playerId);
   const leader = props.room.players.find((p) => p.id === props.room.leaderId);
-  const isHost = props.room.hostId === props.playerId;
+  const live = props.room.phase === "live" && Boolean(lot);
   const left = Math.max(0, Math.ceil((props.room.endsAt - props.now) / 1000));
   const full = (me?.squad.length ?? 0) >= MAX_SQUAD;
+  const passed = props.room.passed ?? [];
+  const iPassed = passed.includes(props.playerId);
+  const leading = props.room.leaderId === props.playerId;
 
   const nextLabel = useMemo(() => {
     if (!lot || props.room.phase !== "live") return "";
@@ -417,7 +420,17 @@ function Board(props: {
           <p className="font-display tracking-[0.22em] text-primary">ROOM {props.room.code}</p>
           <h1 className="font-display text-4xl font-extrabold">IPL Auction</h1>
         </div>
-        <p className="text-sm font-medium text-muted">{me ? me.team : "Watching"}</p>
+        <div className="flex items-center gap-3">
+          {live ? (
+            <div
+              className={`grid h-12 min-w-12 place-items-center rounded-2xl border border-line bg-white px-2 font-display text-xl font-extrabold tabular-nums shadow-[0_8px_18px_rgba(122,75,40,0.14)] ${left <= 5 ? "timer-hot text-primary" : "text-gold"}`}
+              aria-label={`${left} seconds left`}
+            >
+              {left}s
+            </div>
+          ) : null}
+          <p className="text-sm font-medium text-muted">{me ? me.team : "Watching"}</p>
+        </div>
       </header>
 
       {props.room.phase === "done" || !lot ? (
@@ -432,10 +445,7 @@ function Board(props: {
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
           </p>
-          <p className={`relative mt-4 font-display text-7xl font-extrabold tabular-nums ${left <= 5 ? "timer-hot text-primary" : "text-gold"}`}>
-            {left}
-          </p>
-          <p className="mt-2 font-display text-3xl text-fg">
+          <p className="mt-4 font-display text-3xl text-fg">
             {formatCr(props.room.bid)}
             <span className="ml-2 text-base text-muted">{leader ? leader.team : "koi bid nahi"}</span>
           </p>
@@ -443,36 +453,27 @@ function Board(props: {
           {props.error ? <p className="mt-2 text-sm text-primary">{props.error}</p> : null}
 
           {me ? (
-            <button
-              type="button"
-              onClick={props.onBid}
-              disabled={full}
-              className="btn-gloss relative mt-6 min-h-14 w-full max-w-sm rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
-            >
-              {full ? "Squad full 25/25" : `Bid ${nextLabel}`}
-            </button>
+            <div className="mx-auto mt-6 flex w-full max-w-sm gap-2">
+              <button
+                type="button"
+                onClick={props.onBid}
+                disabled={full || leading}
+                className="btn-gloss relative min-h-14 flex-1 rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
+              >
+                {full ? "Squad full" : leading ? "Leading" : `Bid ${nextLabel}`}
+              </button>
+              <button
+                type="button"
+                onClick={props.onPass}
+                disabled={leading || iPassed}
+                className="min-h-14 rounded-2xl border border-line bg-white px-5 font-semibold text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)] disabled:opacity-40"
+              >
+                {iPassed ? "Passed" : "Pass"}
+              </button>
+            </div>
           ) : (
             <p className="mt-6 text-sm text-muted">Tum is room ke owner nahi ho.</p>
           )}
-
-          {isHost ? (
-            <div className="mt-3 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => props.onClose("sell")}
-                className="btn-gloss min-h-11 rounded-xl px-5 font-semibold"
-              >
-                Sell
-              </button>
-              <button
-                type="button"
-                onClick={() => props.onClose("unsold")}
-                className="min-h-11 rounded-xl border border-line bg-white px-5 font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
-              >
-                Unsold
-              </button>
-            </div>
-          ) : null}
         </section>
       )}
 

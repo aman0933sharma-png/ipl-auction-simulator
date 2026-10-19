@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { addPlayer, beginAuction, forceClose, freshRoom, placeBid, resolveDue, seat, type RoomState } from "./state";
+import { addPlayer, beginAuction, forceClose, freshRoom, passLot, placeBid, resolveDue, seat, type RoomState } from "./state";
 
 const codeSchema = z
   .string()
@@ -155,6 +155,12 @@ export const bid = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
     return mutate(data.code, (state) => placeBid(state, data.playerId, Date.now()));
+  });
+
+export const pass = createServerFn({ method: "POST" })
+  .validator((input: unknown) => actSchema.parse(input))
+  .handler(async ({ data }) => {
+    return mutate(data.code, (state) => passLot(state, data.playerId, Date.now()));
   });
 
 export const closeLot = createServerFn({ method: "POST" })
