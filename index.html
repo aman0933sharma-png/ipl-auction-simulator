@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPL Auction Simulator 2026</title>
+<style>
+  :root {
+    --bg: #050a14;
+    --card: #0f172a;
+    --card-hover: #1e293b;
+    --accent: #ff4d00;
+    --gold: #ffd700;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --border: #1e293b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(135deg, #0c1445 0%, #1e3a8a 100%);
+    padding: 1.4rem 1rem;
+    text-align: center;
+    border-bottom: 4px solid var(--accent);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  header h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.5px; }
+  header p { margin: 0.4rem 0 0; color: #bfdbfe; font-size: 0.9rem; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+  .section {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border);
+  }
+  h2 { margin-top: 0; color: var(--gold); font-size: 1.4rem; }
+  input, button {
+    padding: 0.75rem 1rem;
+    border-radius: 10px;
+    border: none;
+    font-size: 1rem;
+  }
+  input {
+    background: #0c1222;
+    color: white;
+    border: 1px solid #334155;
+    width: 100%;
+    max-width: 280px;
+    margin: 0.4rem 0.4rem 0.4rem 0;
+  }
+  input:focus { outline: 2px solid var(--accent); }
+  button {
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    font-weight: 600;
+    transition: 0.15s;
+  }
+  button:hover { transform: translateY(-1px); filter: brightness(1.08); }
+  button:disabled { background: #475569; cursor: not-allowed; transform: none; }
+  button.secondary { background: #334155; }
+  .owner-card {
+    background: var(--card-hover);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.8rem;
+    border-left: 4px solid var(--accent);
+  }
+  .current-player {
+    text-align: center;
+    background: linear-gradient(180deg, #1e3a5f 0%, #0f172a 100%);
+    padding: 2rem 1rem;
+    border-radius: 16px;
+    margin: 1rem 0;
+    border: 1px solid #334155;
+  }
+  .current-player h3 { font-size: 2.1rem; margin: 0.4rem 0; color: white; }
+  .bid-display { font-size: 1.6rem; margin: 1rem 0; }
+  .timer {
+    font-size: 2.4rem;
+    font-weight: bold;
+    color: var(--gold);
+    margin: 0.5rem 0;
+  }
+  .timer.warning { color: var(--danger); animation: pulse 0.5s infinite; }
+  @keyframes pulse { 50% { opacity: 0.6; } }
+  .bid-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    justify-content: center;
+    margin: 1rem 0;
+  }
+  .bid-area button {
+    min-width: 140px;
+    padding: 0.8rem 0.6rem;
+    line-height: 1.3;
+  }
+  .teams-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  .purse { color: var(--gold); font-weight: 700; }
+  .role-badge {
+    display: inline-block;
+    background: #334155;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    margin-left: 0.4rem;
+  }
+  .hidden { display: none !important; }
+  .controls { text-align: center; margin: 1rem 0; }
+  .controls button { margin: 0 0.4rem; }
+  .squad-item { font-size: 0.88rem; padding: 0.2rem 0; color: #cbd5e1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏏 IPL Auction Simulator 2026</h1>
+  <p>Real Players • ₹120 Cr Purse • Custom Teams • 2–10 Owners</p>
+</header>
+
+<div class="container">
+  <!-- LOBBY -->
+  <div id="lobby" class="section">
+    <h2>Join as Owner</h2>
+    <p style="color:var(--muted);">Minimum 2, maximum 10 owners. Har owner apna team name rakh sakta hai.</p>
+    <div>
+      <input type="text" id="ownerName" placeholder="Owner Name">
+      <input type="text" id="teamName" placeholder="Team Name">
+      <button onclick="addOwner()">Join</button>
+    </div>
+    <div id="ownersList" style="margin-top:1.2rem;"></div>
+    <div style="margin-top:1.2rem;">
+      <button id="startBtn" onclick="startAuction()" disabled>Start Auction</button>
+    </div>
+  </div>
+
+  <!-- AUCTION -->
+  <div id="auction" class="section hidden">
+    <h2>Live Auction</h2>
+    <div id="currentPlayer" class="current-player">
+      <div style="color:var(--muted); font-size:0.9rem;">NOW BIDDING</div>
+      <h3 id="playerName">-</h3>
+      <div id="playerInfo" style="margin:0.5rem 0; color:#cbd5e1;"></div>
+      <div class="timer" id="timer">15</div>
+      <div class="bid-display">
+        Current Bid: <span id="currentBid" class="purse">-</span>
+      </div>
+      <div id="highestBidder" style="font-size:1.1rem;"></div>
+    </div>
+
+    <div class="bid-area" id="bidButtons"></div>
+
+    <div class="controls">
+      <button onclick="sellPlayer()">Sell Player</button>
+      <button class="secondary" onclick="unsold()">Unsold</button>
+      <button class="secondary" onclick="skipPlayer()">Skip / Next</button>
+    </div>
+
+    <h3 style="margin-top:2rem;">Teams</h3>
+    <div id="teamsGrid" class="teams-grid"></div>
+  </div>
+</div>
+
+<script>
+const PLAYERS = [
+  { name: "Cameron Green", country: "Australia", role: "Allrounder", base: 2 },
+  { name: "Matheesha Pathirana", country: "Sri Lanka", role: "Bowler", base: 2 },
+  { name: "Liam Livingstone", country: "England", role: "Allrounder", base: 2 },
+  { name: "Venkatesh Iyer", country: "India", role: "Allrounder", base: 2 },
+  { name: "Ravi Bishnoi", country: "India", role: "Bowler", base: 2 },
+  { name: "Wanindu Hasaranga", country: "Sri Lanka", role: "Allrounder", base: 2 },
+  { name: "Devon Conway", country: "New Zealand", role: "Batter", base: 2 },
+  { name: "Jake Fraser-McGurk", country: "Australia", role: "Batter", base: 2 },
+  { name: "David Miller", country: "South Africa", role: "Batter", base: 2 },
+  { name: "Steve Smith", country: "Australia", role: "Batter", base: 2 },
+  { name: "Jamie Smith", country: "England", role: "Wicketkeeper", base: 2 },
+  { name: "Ben Duckett", country: "England", role: "Batter", base: 2 },
+  { name: "Anrich Nortje", country: "South Africa", role: "Bowler", base: 2 },
+  { name: "Gus Atkinson", country: "England", role: "Bowler", base: 2 },
+  { name: "Jason Holder", country: "West Indies", role: "Allrounder", base: 2 },
+  { name: "Akeal Hosein", country: "West Indies", role: "Bowler", base: 2 },
+  { name: "Maheesh Theekshana", country: "Sri Lanka", role: "Bowler", base: 2 },
+  { name: "Rachin Ravindra", country: "New Zealand", role: "Allrounder", base: 2 },
+  { name: "Gerald Coetzee", country: "South Africa", role: "Bowler", base: 2 },
+  { name: "Jacob Duffy", country: "New Zealand", role: "Bowler", base: 2 },
+  { name: "Mujeeb Rahman", country: "Afghanistan", role: "Bowler", base: 2 },
+  { name: "Sean Abbott", country: "Australia", role: "Bowler", base: 2 },
+  { name: "Michael Bracewell", country: "New Zealand", role: "Allrounder", base: 2 },
+  { name: "Finn Allen", country: "New Zealand", role: "Batter", base: 2 },
+  { name: "Josh Inglis", country: "Australia", role: "Wicketkeeper", base: 2 },
+  { name: "Kyle Jamieson", country: "New Zealand", role: "Bowler", base: 2 },
+  { name: "Lungi Ngidi", country: "South Africa", role: "Bowler", base: 2 },
+  { name: "Tom Banton", country: "England", role: "Wicketkeeper", base: 2 },
+  { name: "Mustafizur Rahman", country: "Bangladesh", role: "Bowler", base: 2 },
+  { name: "Quinton de Kock", country: "South Africa", role: "Wicketkeeper", base: 1 },
+  { name: "Jonny Bairstow", country: "England", role: "Wicketkeeper", base: 1 },
+  { name: "Akash Deep", country: "India", role: "Bowler", base: 1 },
+  { name: "Rahul Chahar", country: "India", role: "Bowler", base: 1 },
+  { name: "Reeza Hendricks", country: "South Africa", role: "Batter", base: 1 },
+  { name: "Umesh Yadav", country: "India", role: "Bowler", base: 1.5 },
+  { name: "Tim Seifert", country: "New Zealand", role: "Wicketkeeper", base: 1.5 },
+  { name: "Matt Henry", country: "New Zealand", role: "Bowler", base: 1.5 },
+  { name: "Spencer Johnson", country: "Australia", role: "Bowler", base: 1.5 },
+  { name: "Matthew Short", country: "Australia", role: "Allrounder", base: 1.5 },
+  { name: "Rahmanullah Gurbaz", country: "Afghanistan", role: "Wicketkeeper", base: 1.5 },
+  { name: "Prithvi Shaw", country: "India", role: "Batter", base: 0.75 },
+  { name: "Sarfaraz Khan", country: "India", role: "Batter", base: 0.75 },
+  { name: "Rahul Tripathi", country: "India", role: "Batter", base: 0.75 },
+  { name: "Pathum Nissanka", country: "Sri Lanka", role: "Batter", base: 0.75 },
+  { name: "Deepak Hooda", country: "India", role: "Allrounder", base: 0.75 },
+  { name: "Shivam Mavi", country: "India", role: "Bowler", base: 0.75 },
+  { name: "Mayank Agarwal", country: "India", role: "Batter", base: 0.75 },
+  { name: "Kusal Mendis", country: "Sri Lanka", role: "Wicketkeeper", base: 0.75 },
+  { name: "KS Bharat", country: "India", role: "Wicketkeeper", base: 0.75 },
+  { name: "Kartik Sharma", country: "India", role: "Wicketkeeper", base: 0.3 },
+  { name: "Prashant Veer", country: "India", role: "Allrounder", base: 0.3 },
+  { name: "Auqib Dar", country: "India", role: "Allrounder", base: 0.3 },
+  { name: "Tejasvi Singh", country: "India", role: "Batter", base: 0.3 },
+  { name: "Mukul Choudhary", country: "India", role: "Batter", base: 0.3 },
+  { name: "Ashok Sharma", country: "India", role: "Bowler", base: 0.3 },
+  { name: "Kartik Tyagi", country: "India", role: "Bowler", base: 0.3 },
+  { name: "Naman Tiwari", country: "India", role: "Bowler", base: 0.3 },
+  { name: "Sushant Mishra", country: "India", role: "Bowler", base: 0.3 },
+  { name: "Yash Dhull", country: "India", role: "Batter", base: 0.3 },
+  { name: "Abhinav Manohar", country: "India", role: "Batter", base: 0.3 }
+];
+
+let owners = [];
+let currentIndex = 0;
+let currentBid = 0;
+let highestBidder = null;
+let timerInterval = null;
+let timeLeft = 15;
+
+function addOwner() {
+  const name = document.getElementById("ownerName").value.trim();
+  const team = document.getElementById("teamName").value.trim();
+  if (!name || !team) return alert("Owner name aur Team name dono daalo");
+  if (owners.length >= 10) return alert("Maximum 10 owners allowed");
+  owners.push({ name, team, purse: 120, squad: [] });
+  document.getElementById("ownerName").value = "";
+  document.getElementById("teamName").value = "";
+  renderOwners();
+  document.getElementById("startBtn").disabled = owners.length < 2;
+}
+
+function renderOwners() {
+  document.getElementById("ownersList").innerHTML = owners.map((o, i) => `
+    <div class="owner-card">
+      <strong>${o.name}</strong> — ${o.team}
+      <span style="float:right; color:var(--muted);">#${i+1}</span>
+    </div>
+  `).join("");
+}
+
+function startAuction() {
+  if (owners.length < 2) return;
+  document.getElementById("lobby").classList.add("hidden");
+  document.getElementById("auction").classList.remove("hidden");
+  showPlayer();
+  renderTeams();
+}
+
+function showPlayer() {
+  clearInterval(timerInterval);
+  if (currentIndex >= PLAYERS.length) {
+    document.getElementById("currentPlayer").innerHTML = `
+      <h3>Auction Complete!</h3>
+      <p style="color:var(--success);">Saari teams ready hain. Check squads below.</p>
+    `;
+    document.getElementById("bidButtons").innerHTML = "";
+    return;
+  }
+  const p = PLAYERS[currentIndex];
+  currentBid = p.base;
+  highestBidder = null;
+  timeLeft = 15;
+  document.getElementById("playerName").textContent = p.name;
+  document.getElementById("playerInfo").innerHTML = `
+    ${p.country} <span class="role-badge">${p.role}</span><br>
+    Base Price: ₹${p.base} Cr
+  `;
+  updateBidDisplay();
+  startTimer();
+  renderBidButtons();
+}
+
+function startTimer() {
+  const timerEl = document.getElementById("timer");
+  timerEl.textContent = timeLeft;
+  timerEl.classList.remove("warning");
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+    if (timeLeft <= 5) timerEl.classList.add("warning");
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      if (highestBidder !== null) sellPlayer();
+      else unsold();
+    }
+  }, 1000);
+}
+
+function updateBidDisplay() {
+  document.getElementById("currentBid").textContent = `₹${currentBid.toFixed(2)} Cr`;
+  document.getElementById("highestBidder").innerHTML = highestBidder !== null
+    ? `Leading: <strong style="color:var(--gold);">${owners[highestBidder].team}</strong>`
+    : "No bids yet";
+}
+
+function renderBidButtons() {
+  document.getElementById("bidButtons").innerHTML = owners.map((o, i) => {
+    const full = o.squad.length >= 25;
+    return `
+      <button onclick="placeBid(${i})" ${full ? 'disabled' : ''} style="${full ? 'opacity:0.5; cursor:not-allowed;' : ''}">
+        ${o.team}<br>
+        <small style="font-weight:400; opacity:0.85;">
+          ₹${o.purse.toFixed(2)} Cr • ${o.squad.length}/25
+        </small>
+      </button>
+    `;
+  }).join("");
+}
+
+function placeBid(index) {
+  const owner = owners[index];
+  if (owner.squad.length >= 25) {
+    alert(`${owner.team} already has 25 players! Maximum squad size reached.`);
+    return;
+  }
+  const nextBid = +(currentBid + 0.25).toFixed(2);
+  if (owner.purse < nextBid) {
+    alert(`${owner.team} ke paas itna purse nahi hai!`);
+    return;
+  }
+  // Optional overseas check (simple: non-India = overseas)
+  const player = PLAYERS[currentIndex];
+  const isOverseas = player.country !== "India";
+  const overseasCount = owner.squad.filter(p => p.country !== "India").length;
+  if (isOverseas && overseasCount >= 8) {
+    alert(`${owner.team} already has 8 overseas players!`);
+    return;
+  }
+  currentBid = nextBid;
+  highestBidder = index;
+  timeLeft = Math.max(timeLeft, 8);
+  updateBidDisplay();
+}
+
+function sellPlayer() {
+  clearInterval(timerInterval);
+  if (highestBidder === null) return unsold();
+  const winner = owners[highestBidder];
+  const player = PLAYERS[currentIndex];
+  winner.purse = +(winner.purse - currentBid).toFixed(2);
+  winner.squad.push({ ...player, soldFor: currentBid });
+  currentIndex++;
+  showPlayer();
+  renderTeams();
+}
+
+function unsold() {
+  clearInterval(timerInterval);
+  currentIndex++;
+  showPlayer();
+  renderTeams();
+}
+
+function skipPlayer() {
+  clearInterval(timerInterval);
+  currentIndex++;
+  showPlayer();
+  renderTeams();
+}
+
+function renderTeams() {
+  document.getElementById("teamsGrid").innerHTML = owners.map(o => `
+    <div class="owner-card" style="${o.squad.length >= 25 ? 'border-left-color: #ef4444;' : ''}">
+      <strong style="font-size:1.1rem;">${o.team}</strong><br>
+      <span style="color:var(--muted); font-size:0.85rem;">${o.name}</span><br>
+      <div class="purse" style="margin:0.4rem 0;">₹${o.purse.toFixed(2)} Cr left</div>
+      <div style="font-size:0.85rem; color:${o.squad.length >= 25 ? '#ef4444' : 'var(--muted)'}; margin-top:0.5rem; font-weight:${o.squad.length >= 25 ? 'bold' : 'normal'};">
+        Squad (${o.squad.length}/25)${o.squad.length >= 25 ? ' — FULL' : ''}
+        ${o.squad.map(p => `<div class="squad-item">• ${p.name} — ₹${p.soldFor} Cr</div>`).join("") || "<div class='squad-item'>No players yet</div>"}
+      </div>
+    </div>
+  `).join("");
+}
+</script>
+</body>
+</html>
