@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
-import { LOTS, MAX_SQUAD, formatCr } from "@/lib/auction/catalog";
+import { LOTS, MAX_SQUAD, formatCr, lotTitle } from "@/lib/auction/catalog";
 import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
 import type { RoomState } from "@/lib/auction/state";
 
@@ -39,7 +39,7 @@ function CodeTiles({ value }: { value: string }) {
         <span
           key={`${ch}-${i}`}
           style={{ animationDelay: `${i * 60}ms` }}
-          className="tile flex h-16 w-12 items-center justify-center rounded-2xl border border-white/80 bg-white/80 font-display text-3xl font-extrabold tracking-wide text-gold shadow-[0_10px_24px_rgba(122,75,40,0.18)]"
+          className="tile flex h-16 w-12 items-center justify-center rounded-2xl border border-white/80 bg-white/80 font-display text-3xl font-extrabold tracking-wide text-gold shadow-[0_10px_24px_rgba(150,170,200,0.22)]"
         >
           {ch}
         </span>
@@ -276,7 +276,7 @@ function Gate(props: {
           <button
             type="button"
             onClick={props.onRandom}
-            className="min-h-12 shrink-0 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
+            className="min-h-12 shrink-0 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(150,170,200,0.2)]"
           >
             Random
           </button>
@@ -349,7 +349,7 @@ function Lobby(props: {
       <button
         type="button"
         onClick={props.onCopy}
-        className="relative mx-auto mt-4 flex min-h-11 items-center gap-2 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
+        className="relative mx-auto mt-4 flex min-h-11 items-center gap-2 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(150,170,200,0.2)]"
       >
         <Copy className="size-4" aria-hidden="true" />
         {props.copied ? "Copy ho gaya" : "Code copy karo"}
@@ -361,7 +361,7 @@ function Lobby(props: {
       </div>
       <ul className="mt-3 grid gap-2">
         {props.room.players.map((p, i) => (
-          <li key={p.id} className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(122,75,40,0.1)]">
+          <li key={p.id} className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(150,170,200,0.16)]">
             <div>
               <p className="font-medium text-fg">{p.team}</p>
               <p className="text-sm text-muted">{p.name}</p>
@@ -423,7 +423,7 @@ function Board(props: {
         <div className="flex items-center gap-3">
           {live ? (
             <div
-              className={`grid h-12 min-w-12 place-items-center rounded-2xl border border-line bg-white px-2 font-display text-xl font-extrabold tabular-nums shadow-[0_8px_18px_rgba(122,75,40,0.14)] ${left <= 5 ? "timer-hot text-primary" : "text-gold"}`}
+              className={`grid h-12 min-w-12 place-items-center rounded-2xl border border-line bg-white px-2 font-display text-xl font-extrabold tabular-nums shadow-[0_8px_18px_rgba(150,170,200,0.2)] ${left <= 5 ? "timer-hot text-primary" : "text-gold"}`}
               aria-label={`${left} seconds left`}
             >
               {left}s
@@ -440,7 +440,7 @@ function Board(props: {
         </section>
       ) : (
         <section className="glass sheen rise rounded-[28px] p-6 text-center sm:p-10">
-          <p className="text-sm tracking-widest text-muted">NOW BIDDING</p>
+          <p className="text-sm tracking-widest text-muted">{lotTitle(lot.role).toUpperCase()} LOT</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
@@ -466,7 +466,7 @@ function Board(props: {
                 type="button"
                 onClick={props.onPass}
                 disabled={leading || iPassed}
-                className="min-h-14 rounded-2xl border border-line bg-white px-5 font-semibold text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)] disabled:opacity-40"
+                className="min-h-14 rounded-2xl border border-line bg-white px-5 font-semibold text-fg shadow-[0_8px_18px_rgba(150,170,200,0.2)] disabled:opacity-40"
               >
                 {iPassed ? "Passed" : "Pass"}
               </button>
@@ -477,28 +477,34 @@ function Board(props: {
         </section>
       )}
 
-      <h3 className="mt-8 font-display text-2xl">Teams</h3>
+      <h3 className="mt-8 font-display text-2xl">Owners</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {props.room.players.map((p) => (
-          <article key={p.id} className="glass rise rounded-3xl p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <h4 className="font-display text-2xl">{p.team}</h4>
-              <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
-            </div>
-            <p className="text-sm text-muted">
-              {p.name} · {p.squad.length}/{MAX_SQUAD}
-              {p.squad.length >= MAX_SQUAD ? " full" : ""}
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-fg">
-              {p.squad.length === 0 ? <li className="text-muted">Abhi khaali</li> : null}
-              {p.squad.map((s) => (
-                <li key={s.name}>
-                  {s.name} · {formatCr(s.soldFor)}
-                </li>
-              ))}
-            </ul>
-          </article>
-        ))}
+        {props.room.players.map((p) => {
+          const mine = p.id === props.playerId;
+          return (
+            <article key={p.id} className="glass rise rounded-3xl p-4">
+              <div className="flex items-baseline justify-between gap-2">
+                <h4 className="font-display text-2xl">{p.team}</h4>
+                <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
+              </div>
+              <p className="text-sm text-muted">
+                {p.name} · {p.squad.length}/{MAX_SQUAD}
+                {p.squad.length >= MAX_SQUAD ? " full" : ""}
+                {mine ? "" : " · players hidden"}
+              </p>
+              {mine ? (
+                <ul className="mt-2 space-y-1 text-sm text-fg">
+                  {p.squad.length === 0 ? <li className="text-muted">Abhi khaali</li> : null}
+                  {p.squad.map((s) => (
+                    <li key={s.name}>
+                      {s.name} · {formatCr(s.soldFor)}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
     </main>
   );

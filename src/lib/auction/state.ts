@@ -168,12 +168,17 @@ export function passLot(state: RoomState, playerId: string, now: number): RoomSt
   if (settled.leaderId === playerId) throw new Error("Tum leading ho. Pass nahi kar sakte.");
   const passed = settled.passed ?? [];
   if (passed.includes(playerId)) throw new Error("Tum is player pe pass kar chuke ho.");
-  return {
+  const next: RoomState = {
     ...settled,
     passed: [...passed, playerId],
     endsAt: now + BID_MS,
-    commentary: `${me.team} ne pass kiya. 30 second reset.`,
+    commentary: `${me.team} ne pass kiya.`,
   };
+  const othersPassed =
+    Boolean(next.leaderId) &&
+    next.players.every((p) => p.id === next.leaderId || next.passed.includes(p.id));
+  if (!othersPassed) return next;
+  return resolveDue({ ...next, endsAt: now }, now);
 }
 
 export function forceClose(state: RoomState, playerId: string, now: number, mode: "sell" | "unsold"): RoomState {

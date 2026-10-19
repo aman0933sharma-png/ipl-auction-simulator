@@ -59,3 +59,17 @@ export const LOTS: Lot[] = [
 export function formatCr(lakh: number): string {
   return `₹${(lakh / 100).toFixed(2)} Cr`;
 }
+
+const ROLE_ORDER: Record<Role, number> = {
+  Batter: 0,
+  Wicketkeeper: 1,
+  Bowler: 2,
+  Allrounder: 3,
+};
+LOTS.sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]);
+
+export function lotTitle(role: Role): string {
+  if (role === "Bowler") return "Bowlers";
+  if (role === "Allrounder") return "Allrounders";
+  return "Batters";
+}
