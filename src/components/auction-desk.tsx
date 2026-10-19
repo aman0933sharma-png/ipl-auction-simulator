@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
-import { KINDS, formatCr, getKind, lotTitle, type AuctionKind } from "@/lib/auction/catalog";
+import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
 import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
 import type { RoomState } from "@/lib/auction/state";
 
@@ -28,7 +28,11 @@ function usePlayerId() {
 
 function messageOf(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
-  return "Kuch gadbad ho gayi. Dubara try karo.";
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return "Bid nahi lagi. Ek baar aur tap karo.";
 }
 
 function CodeTiles({ value }: { value: string }) {
@@ -60,6 +64,7 @@ export function AuctionDesk() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const actionRef = useRef(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -72,7 +77,12 @@ export function AuctionDesk() {
     const pull = async () => {
       try {
         const next = await syncRoom({ data: { code: room.code, playerId } });
-        if (!stop) setRoom(next);
+        if (stop || actionRef.current) return;
+        setRoom((current) => {
+          if (!current) return next;
+          if ((next.rev ?? 0) < (current.rev ?? 0)) return current;
+          return next;
+        });
       } catch {
         /* keep last good snapshot */
       }
@@ -124,22 +134,32 @@ export function AuctionDesk() {
   }
 
   async function onBid() {
-    if (!room || !playerId) return;
+    if (!room || !playerId || actionRef.current) return;
+    actionRef.current = true;
+    setBusy(true);
     setError("");
     try {
       setRoom(await bid({ data: { code: room.code, playerId } }));
     } catch (err) {
       setError(messageOf(err));
+    } finally {
+      actionRef.current = false;
+      setBusy(false);
     }
   }
 
   async function onPass() {
-    if (!room || !playerId) return;
+    if (!room || !playerId || actionRef.current) return;
+    actionRef.current = true;
+    setBusy(true);
     setError("");
     try {
       setRoom(await pass({ data: { code: room.code, playerId } }));
     } catch (err) {
       setError(messageOf(err));
+    } finally {
+      actionRef.current = false;
+      setBusy(false);
     }
   }
 
@@ -198,6 +218,7 @@ export function AuctionDesk() {
       error={error}
       onBid={onBid}
       onPass={onPass}
+      busy={busy}
     />
   );
 }
@@ -432,6 +453,7 @@ function Board(props: {
   error: string;
   onBid: () => void;
   onPass: () => void;
+  busy: boolean;
 }) {
   const rule = getKind(props.room.kind);
   const lot = rule.lots[props.room.index];
@@ -439,7 +461,7 @@ function Board(props: {
   const leader = props.room.players.find((p) => p.id === props.room.leaderId);
   const live = props.room.phase === "live" && Boolean(lot);
   const left = Math.max(0, Math.ceil((props.room.endsAt - props.now) / 1000));
-  const full = (me?.squad.length ?? 0) >= rule.maxItems;
+  const full = lot ? squadCount(me?.squad ?? [], lot, props.room.kind) >= rule.maxItems : false;
   const passed = props.room.passed ?? [];
   const iPassed = passed.includes(props.playerId);
   const leading = props.room.leaderId === props.playerId;
@@ -477,7 +499,7 @@ function Board(props: {
         </section>
       ) : (
         <section className="glass sheen rise rounded-[28px] p-6 text-center sm:p-10">
-          <p className="text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role).toUpperCase()} LOT</p>
+          <p className="text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
@@ -494,15 +516,15 @@ function Board(props: {
               <button
                 type="button"
                 onClick={props.onBid}
-                disabled={full || leading}
+                disabled={full || leading || props.busy}
                 className="btn-gloss relative min-h-14 flex-1 rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
               >
-                {full ? "Limit full" : leading ? "Leading" : `Bid ${nextLabel}`}
+                {props.busy ? "Ruk jao..." : full ? "Limit full" : leading ? "Leading" : `Bid ${nextLabel}`}
               </button>
               <button
                 type="button"
                 onClick={props.onPass}
-                disabled={leading || iPassed}
+                disabled={leading || iPassed || props.busy}
                 className="min-h-14 rounded-2xl border border-line bg-white px-5 font-semibold text-fg shadow-[0_8px_18px_rgba(150,170,200,0.2)] disabled:opacity-40"
               >
                 {iPassed ? "Passed" : "Pass"}
@@ -525,11 +547,30 @@ function Board(props: {
                 <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
               </div>
               <p className="text-sm text-muted">
-                {p.name} · {p.squad.length}/{rule.maxItems}
-                {p.squad.length >= rule.maxItems ? " full" : ""}
-                {mine ? "" : " · players hidden"}
+                {p.name}
+                {rule.id === "ipl" ? "" : ` · ${p.squad.length}/${rule.maxItems}`}
+                {mine ? "" : " · list hidden"}
               </p>
-              {mine ? (
+              {mine && rule.id === "ipl" ? (
+                <div className="mt-2 space-y-2 text-sm text-fg">
+                  {["Test", "ODI", "T20"].map((group) => {
+                    const picked = p.squad.filter((item) => item.group === group);
+                    return (
+                      <div key={group}>
+                        <p className="text-muted">
+                          {group} {picked.length}/{rule.maxItems}
+                        </p>
+                        {picked.map((item) => (
+                          <p key={`${group}-${item.name}`}>
+                            {item.name} · {formatCr(item.soldFor)}
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {mine && rule.id !== "ipl" ? (
                 <ul className="mt-2 space-y-1 text-sm text-fg">
                   {p.squad.length === 0 ? <li className="text-muted">Abhi khaali</li> : null}
                   {p.squad.map((s) => (

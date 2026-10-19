@@ -1,6 +1,7 @@
 import {
   MAX_PLAYERS,
   getKind,
+  squadCount,
   type AuctionKind,
   type Lot,
 } from "./catalog";
@@ -30,6 +31,7 @@ export type RoomState = {
   passed: string[];
   commentary: string;
   feed: string[];
+  rev: number;
 };
 
 export function freshRoom(code: string, host: Seat, kind: AuctionKind = "ipl"): RoomState {
@@ -46,6 +48,7 @@ export function freshRoom(code: string, host: Seat, kind: AuctionKind = "ipl"): 
     passed: [],
     commentary: "Owners join kar rahe hain. Minimum 2 chahiye.",
     feed: [],
+    rev: 1,
   };
 }
 
@@ -59,6 +62,10 @@ function rules(state: RoomState) {
 
 function lotAt(state: RoomState) {
   return rules(state).lots[state.index];
+}
+
+function stamp(state: RoomState): RoomState {
+  return { ...state, rev: (state.rev ?? 0) + 1 };
 }
 
 function pushFeed(state: RoomState, line: string): string[] {
@@ -126,7 +133,7 @@ export function resolveDue(state: RoomState, now: number): RoomState {
       feed: pushFeed(state, line),
     };
   }
-  return openLot(next, now);
+  return stamp(openLot(next, now));
 }
 
 export function beginAuction(state: RoomState, playerId: string, now: number): RoomState {
@@ -135,7 +142,7 @@ export function beginAuction(state: RoomState, playerId: string, now: number): R
   if (state.players.length < 2) {
     throw new Error("Kam se kam 2 owners chahiye. Doosra phone room code se join kare.");
   }
-  return openLot({ ...state, phase: "live", index: 0 }, now);
+  return stamp(openLot({ ...state, phase: "live", index: 0 }, now));
 }
 
 export function placeBid(state: RoomState, playerId: string, now: number): RoomState {
@@ -144,8 +151,11 @@ export function placeBid(state: RoomState, playerId: string, now: number): RoomS
   const me = settled.players.find((p) => p.id === playerId);
   if (!me) throw new Error("Tum is room mein nahi ho.");
   const rule = rules(settled);
-  if (me.squad.length >= rule.maxItems) {
-    throw new Error(`${me.team} ke ${rule.maxItems} ${rule.item} poore ho gaye.`);
+  const owned = squadCount(me.squad, lotAt(settled) ?? { name: "", country: "", role: "", base: 0 }, rule.id);
+  if (lotAt(settled) && owned >= rule.maxItems) {
+    const lot = lotAt(settled)!;
+    const label = rule.id === "ipl" && lot.group ? lot.group : rule.item;
+    throw new Error(`${me.team} ke ${rule.maxItems} ${label} poore ho gaye.`);
   }
   const lot = lotAt(settled);
   if (!lot) throw new Error("Koi lot nahi bacha.");
@@ -156,14 +166,14 @@ export function placeBid(state: RoomState, playerId: string, now: number): RoomS
   const nextBid = settled.leaderId === null ? lot.base : settled.bid + rule.step;
   if (settled.leaderId === playerId) throw new Error("Tum pehle se leading ho.");
   if (me.purse < nextBid) throw new Error("Purse kam pad raha hai.");
-  return {
+  return stamp({
     ...settled,
     bid: nextBid,
     leaderId: playerId,
     endsAt: now + rule.bidMs,
     passed: [],
     commentary: `${me.team} ne ${nextBid / 100} crore lagaya.`,
-  };
+  });
 }
 
 export function passLot(state: RoomState, playerId: string, now: number): RoomState {
@@ -181,7 +191,7 @@ export function passLot(state: RoomState, playerId: string, now: number): RoomSt
     commentary: `${me.team} ne pass kiya.`,
   };
   const allPassed = next.players.every((p) => p.id === next.leaderId || next.passed.includes(p.id));
-  if (!allPassed) return next;
+  if (!allPassed) return stamp(next);
   return resolveDue({ ...next, endsAt: now }, now);
 }
 
@@ -211,20 +221,20 @@ export function addPlayer(state: RoomState, incoming: Seat): RoomState {
       (p) => p.id !== incoming.id && p.team.toLowerCase() === incoming.team.toLowerCase(),
     );
     if (clash) throw new Error("Ye team name pehle se liya hua hai.");
-    return {
+    return stamp({
       ...state,
       players: state.players.map((p) =>
         p.id === incoming.id ? { ...p, name: incoming.name, team: incoming.team } : p,
       ),
       commentary: `${incoming.team} lobby mein hai.`,
-    };
+    });
   }
   if (state.players.length >= MAX_PLAYERS) throw new Error("Room full hai. Max 10 owners.");
   const clash = state.players.some((p) => p.team.toLowerCase() === incoming.team.toLowerCase());
   if (clash) throw new Error("Ye team name pehle se liya hua hai.");
-  return {
+  return stamp({
     ...state,
     players: [...state.players, incoming],
     commentary: `${incoming.name} — ${incoming.team} join ho gaya.`,
-  };
+  });
 }

@@ -22,18 +22,12 @@
   body {
     color: var(--color-fg);
     font-family: var(--font-sans);
-    background:
-      radial-gradient(circle at 8% 12%, rgba(255, 255, 255, 0.95) 0, transparent 26%),
-      radial-gradient(circle at 92% 0%, #e7f0ff 0, transparent 32%),
-      radial-gradient(circle at 70% 100%, #f7fbff 0, transparent 34%),
-      radial-gradient(circle at 0% 100%, #eef4fb 0, transparent 28%),
-      var(--color-bg);
-    background-size: 140% 140%;
-    animation: drift 16s ease-in-out infinite alternate;
+    background: #f6f7f9;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+    touch-action: manipulation;
   }
   h1, h2, h3 {
     text-wrap: balance;
@@ -42,61 +36,24 @@
 
 @layer components {
   .glass {
-    position: relative;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.85);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.62));
-    box-shadow:
-      0 22px 50px rgba(160, 180, 210, 0.28),
-      inset 0 1px 0 #fff;
-    backdrop-filter: blur(16px);
+    border: 1px solid var(--color-line);
+    background: #fff;
   }
+  .sheen::after,
   .glass::before {
-    content: "";
-    pointer-events: none;
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 100%;
-    height: 42%;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent);
-  }
-  .sheen::after {
-    content: "";
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(110deg, transparent 32%, rgba(255, 255, 255, 0.7) 48%, transparent 64%);
-    transform: translateX(-130%);
-    animation: sheen 3.6s ease-in-out infinite;
+    content: none;
   }
   .btn-gloss {
-    color: var(--color-on);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.85), transparent 46%),
-      linear-gradient(180deg, #ffffff 0%, #f3f7fd 52%, #dbe6f4 100%);
-    box-shadow:
-      0 12px 26px rgba(150, 170, 200, 0.35),
-      inset 0 1px 0 #fff;
-    transition: transform 160ms ease, box-shadow 160ms ease;
+    color: #fff;
+    background: #1a2332;
   }
-  .btn-gloss:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow:
-      0 16px 30px rgba(150, 170, 200, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  .btn-gloss:disabled {
+    cursor: default;
   }
-  .btn-gloss:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-  .tile {
-    animation: pop 0.45s cubic-bezier(0.2, 1.35, 0.4, 1) both;
-  }
-  .rise {
-    animation: rise 0.5s ease both;
-  }
+  .tile,
+  .rise,
   .timer-hot {
-    animation: pulse 0.7s ease-in-out infinite;
+    animation: none;
   }
 }
 

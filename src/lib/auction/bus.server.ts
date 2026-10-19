@@ -87,7 +87,7 @@ async function pull(code: string): Promise<Envelope | null> {
       seen.add(code);
       resolve(env);
     };
-    const timer = setTimeout(() => finish(rooms.get(code) ?? null), 1600);
+    const timer = setTimeout(() => finish(rooms.get(code) ?? null), 800);
     const onMessage = (got: string, payload: Buffer) => {
       if (got !== name) return;
       finish(remember(got, payload));
@@ -146,7 +146,7 @@ export async function saveRoom(
   if (!current || current.version !== expected) return false;
   const env = { version: expected + 1, hostId, state, token: token() };
   await publish(code, env);
-  await new Promise((resolve) => setTimeout(resolve, 280));
+  await new Promise((resolve) => setTimeout(resolve, 80));
   const latest = await pull(code);
   return latest?.token === env.token && latest.version === env.version;
 }

@@ -1,8 +1,13 @@
+import { CARS } from "./cars";
+import { PLAYERS } from "./players";
+
 export type Lot = {
   name: string;
   /** Country for players, brand for cars and bikes. */
   country: string;
   role: string;
+  /** Test, ODI, T20, or a car class. */
+  group?: string;
   /** Price in lakh. 100 = ₹1.00 Cr */
   base: number;
 };
@@ -16,56 +21,10 @@ export const EXTEND_MS = 30_000;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 10;
 
-export const LOTS: Lot[] = [
-  { name: "Cameron Green", country: "Australia", role: "Allrounder", base: 200 },
-  { name: "Matheesha Pathirana", country: "Sri Lanka", role: "Bowler", base: 200 },
-  { name: "Liam Livingstone", country: "England", role: "Allrounder", base: 200 },
-  { name: "Venkatesh Iyer", country: "India", role: "Allrounder", base: 200 },
-  { name: "Ravi Bishnoi", country: "India", role: "Bowler", base: 200 },
-  { name: "Wanindu Hasaranga", country: "Sri Lanka", role: "Allrounder", base: 200 },
-  { name: "Devon Conway", country: "New Zealand", role: "Batter", base: 200 },
-  { name: "Jake Fraser-McGurk", country: "Australia", role: "Batter", base: 200 },
-  { name: "David Miller", country: "South Africa", role: "Batter", base: 200 },
-  { name: "Steve Smith", country: "Australia", role: "Batter", base: 200 },
-  { name: "Jamie Smith", country: "England", role: "Wicketkeeper", base: 200 },
-  { name: "Ben Duckett", country: "England", role: "Batter", base: 200 },
-  { name: "Anrich Nortje", country: "South Africa", role: "Bowler", base: 200 },
-  { name: "Gus Atkinson", country: "England", role: "Bowler", base: 200 },
-  { name: "Jason Holder", country: "West Indies", role: "Allrounder", base: 200 },
-  { name: "Rachin Ravindra", country: "New Zealand", role: "Allrounder", base: 200 },
-  { name: "Finn Allen", country: "New Zealand", role: "Batter", base: 200 },
-  { name: "Josh Inglis", country: "Australia", role: "Wicketkeeper", base: 200 },
-  { name: "Mustafizur Rahman", country: "Bangladesh", role: "Bowler", base: 200 },
-  { name: "Quinton de Kock", country: "South Africa", role: "Wicketkeeper", base: 100 },
-  { name: "Jonny Bairstow", country: "England", role: "Wicketkeeper", base: 100 },
-  { name: "Akash Deep", country: "India", role: "Bowler", base: 100 },
-  { name: "Rahul Chahar", country: "India", role: "Bowler", base: 100 },
-  { name: "Tim Seifert", country: "New Zealand", role: "Wicketkeeper", base: 150 },
-  { name: "Matt Henry", country: "New Zealand", role: "Bowler", base: 150 },
-  { name: "Prithvi Shaw", country: "India", role: "Batter", base: 75 },
-  { name: "Sarfaraz Khan", country: "India", role: "Batter", base: 75 },
-  { name: "Rahul Tripathi", country: "India", role: "Batter", base: 75 },
-  { name: "Pathum Nissanka", country: "Sri Lanka", role: "Batter", base: 75 },
-  { name: "Deepak Hooda", country: "India", role: "Allrounder", base: 75 },
-  { name: "Shivam Mavi", country: "India", role: "Bowler", base: 75 },
-  { name: "Mayank Agarwal", country: "India", role: "Batter", base: 75 },
-  { name: "Kartik Tyagi", country: "India", role: "Bowler", base: 30 },
-  { name: "Yash Dhull", country: "India", role: "Batter", base: 30 },
-  { name: "Prashant Veer", country: "India", role: "Allrounder", base: 30 },
-  { name: "Naman Tiwari", country: "India", role: "Bowler", base: 30 },
-];
-
 export function formatCr(lakh: number): string {
   return `₹${(lakh / 100).toFixed(2)} Cr`;
 }
 
-const ROLE_ORDER: Record<string, number> = {
-  Batter: 0,
-  Wicketkeeper: 1,
-  Bowler: 2,
-  Allrounder: 3,
-};
-LOTS.sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9));
 
 export type AuctionKind = "ipl" | "cars" | "bikes";
 
@@ -83,28 +42,6 @@ export type KindSpec = {
   bidMs: number;
   lots: Lot[];
 };
-
-const CARS: Lot[] = [
-  { name: "BMW M4 Competition", country: "BMW", role: "Sports", base: 1500 },
-  { name: "Porsche 911 Carrera", country: "Porsche", role: "Sports", base: 2000 },
-  { name: "Mercedes-AMG GT", country: "Mercedes", role: "Sports", base: 2800 },
-  { name: "Nissan GT-R", country: "Nissan", role: "Sports", base: 1800 },
-  { name: "Toyota Supra", country: "Toyota", role: "Sports", base: 900 },
-  { name: "Audi R8", country: "Audi", role: "Sports", base: 2600 },
-  { name: "Ford Mustang GT", country: "Ford", role: "Sports", base: 800 },
-  { name: "Range Rover Sport", country: "Land Rover", role: "SUV", base: 1800 },
-  { name: "Mercedes G-Wagon", country: "Mercedes", role: "SUV", base: 3200 },
-  { name: "BMW X7", country: "BMW", role: "SUV", base: 1400 },
-  { name: "Toyota Land Cruiser", country: "Toyota", role: "SUV", base: 2100 },
-  { name: "Lamborghini Urus", country: "Lamborghini", role: "SUV", base: 4500 },
-  { name: "Porsche Cayenne", country: "Porsche", role: "SUV", base: 1600 },
-  { name: "Defender 110", country: "Land Rover", role: "SUV", base: 1300 },
-  { name: "Mercedes S-Class", country: "Mercedes", role: "Sedan", base: 1900 },
-  { name: "BMW 7 Series", country: "BMW", role: "Sedan", base: 1600 },
-  { name: "Audi A8", country: "Audi", role: "Sedan", base: 1500 },
-  { name: "Bentley Flying Spur", country: "Bentley", role: "Sedan", base: 5500 },
-  { name: "Rolls-Royce Ghost", country: "Rolls-Royce", role: "Sedan", base: 7500 },
-];
 
 const BIKES: Lot[] = [
   { name: "Ducati Panigale V4", country: "Ducati", role: "Sport", base: 40 },
@@ -126,25 +63,25 @@ const BIKES: Lot[] = [
 export const KINDS: KindSpec[] = [
   {
     id: "ipl",
-    title: "IPL Auction",
-    blurb: "Players, 25 squad",
-    purse: 12000,
-    step: 25,
-    maxItems: 25,
+    title: "Cricket Auction",
+    blurb: "Test, ODI and T20",
+    purse: 35000,
+    step: 50,
+    maxItems: 15,
     item: "players",
     teamLabel: "Team name",
     teamHint: "Pahadi XI",
-    overseas: 8,
+    overseas: null,
     bidMs: 30_000,
-    lots: LOTS,
+    lots: PLAYERS,
   },
   {
     id: "cars",
     title: "Car Auction",
-    blurb: "Sports, SUV, sedan",
-    purse: 20000,
+    blurb: "Hatch, sedan, SUV, sports",
+    purse: 25000,
     step: 50,
-    maxItems: 5,
+    maxItems: 15,
     item: "cars",
     teamLabel: "Garage name",
     teamHint: "Night Garage",
@@ -172,11 +109,12 @@ export function getKind(id?: string): KindSpec {
   return KINDS.find((kind) => kind.id === id) ?? KINDS[0];
 }
 
-export function lotTitle(kind: string | undefined, role: string): string {
-  if ((kind ?? "ipl") === "ipl") {
-    if (role === "Bowler") return "Bowlers";
-    if (role === "Allrounder") return "Allrounders";
-    return "Batters";
-  }
-  return role;
+export function lotTitle(kind: string | undefined, role: string, group?: string): string {
+  if ((kind ?? "ipl") === "ipl") return group || "Test";
+  return group || role;
+}
+
+export function squadCount(squad: Lot[], lot: Lot, kind?: string): number {
+  if ((kind ?? "ipl") === "ipl" && lot.group) return squad.filter((item) => item.group === lot.group).length;
+  return squad.length;
 }
