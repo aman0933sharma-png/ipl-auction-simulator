@@ -4,7 +4,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const srcDir = join(root, "node_modules/@electric-sql/pglite/dist");
 const files = ["pglite.data", "pglite.wasm", "initdb.wasm"];
-const out = join(root, ".vercel/output/functions");
+const outs = [join(root, ".vercel/output/functions"), join(root, ".netlify/functions-internal")];
 
 function walk(dir, found) {
   if (!existsSync(dir)) return;
@@ -16,7 +16,7 @@ function walk(dir, found) {
 }
 
 const dirs = [];
-walk(out, dirs);
+for (const out of outs) walk(out, dirs);
 if (dirs.length === 0) {
   console.log("[pglite] no bundled function output, skip");
   process.exit(0);
