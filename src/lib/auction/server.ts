@@ -26,8 +26,9 @@ const actSchema = z.object({
 
 type Row = { code: string; host_id: string; version: number; state: string };
 
-function parseState(raw: string): RoomState {
-  return JSON.parse(raw) as RoomState;
+function parseState(raw: string | RoomState): RoomState {
+  if (typeof raw === "string") return JSON.parse(raw) as RoomState;
+  return raw;
 }
 
 async function load(code: string): Promise<Row | null> {
@@ -95,11 +96,26 @@ export const createRoom = createServerFn({ method: "POST" })
     const host = seat(data.playerId, data.name, data.team);
     const state = freshRoom(data.code, host);
     const sql = await getSql();
-    await sql.query(
-      `insert into auction_rooms (code, host_id, version, state)
-       values ($1, $2, 1, $3)`,
-      [data.code, host.id, JSON.stringify(state)],
-    );
+    try {
+      await sql.query(
+        `insert into auction_rooms (code, host_id, version, state)
+         values ($1, $2, 1, $3)`,
+        [data.code, host.id, JSON.stringify(state)],
+      );
+    } catch (error) {
+      const again = await load(data.code);
+      if (again) {
+        const existingState = parseState(again.state);
+        if (existingState.players.some((p) => p.id === data.playerId) || existingState.phase === "lobby") {
+          return mutate(data.code, (s) => addPlayer(s, host));
+        }
+      }
+      const detail = error instanceof Error ? error.message : "";
+      if (/duplicate|unique/i.test(detail)) {
+        throw new Error("Ye room code pehle se use ho raha hai. Doosra code try karo, ya Code se join dabao.");
+      }
+      throw new Error(detail || "Room nahi bana. Dubara try karo.");
+    }
     return state;
   });
 

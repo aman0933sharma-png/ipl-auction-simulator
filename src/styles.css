@@ -2,15 +2,16 @@
 
 @theme {
   --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
-  --color-bg: #071018;
-  --color-surface: #101c28;
-  --color-raised: #172636;
-  --color-fg: #f4efe4;
-  --color-muted: #8ea0b0;
-  --color-primary: #e85d04;
-  --color-gold: #e6b325;
-  --color-line: #2a4054;
+  --font-display: "Syne", "Outfit", sans-serif;
+  --color-bg: #fbf7f2;
+  --color-surface: #ffffff;
+  --color-raised: #f3e6d4;
+  --color-fg: #3a2414;
+  --color-muted: #8a6a52;
+  --color-primary: #8a5a32;
+  --color-gold: #6b3e22;
+  --color-line: #ead8c4;
+  --color-on: #ffffff;
 }
 
 @layer base {
@@ -19,9 +20,20 @@
     -moz-osx-font-smoothing: grayscale;
   }
   body {
-    background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
+    background:
+      repeating-linear-gradient(
+        92deg,
+        rgba(122, 75, 40, 0.045) 0 2px,
+        transparent 2px 8px
+      ),
+      radial-gradient(circle at 8% 0%, #f3e2cc 0, transparent 34%),
+      radial-gradient(circle at 100% 12%, #fff 0, transparent 30%),
+      radial-gradient(circle at 80% 100%, #e7d0b4 0, transparent 38%),
+      var(--color-bg);
+    background-size: 140% 140%;
+    animation: drift 16s ease-in-out infinite alternate;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
@@ -30,6 +42,86 @@
   h1, h2, h3 {
     text-wrap: balance;
   }
+}
+
+@layer components {
+  .glass {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.62));
+    box-shadow:
+      0 22px 50px rgba(122, 75, 40, 0.16),
+      inset 0 1px 0 #fff;
+    backdrop-filter: blur(16px);
+  }
+  .glass::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    height: 42%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent);
+  }
+  .sheen::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 32%, rgba(255, 255, 255, 0.7) 48%, transparent 64%);
+    transform: translateX(-130%);
+    animation: sheen 3.6s ease-in-out infinite;
+  }
+  .btn-gloss {
+    color: var(--color-on);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent 42%),
+      linear-gradient(180deg, #e8c9a2 0%, #b5814a 48%, #7a4b28 100%);
+    box-shadow:
+      0 12px 26px rgba(122, 75, 40, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+  .btn-gloss:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      0 16px 30px rgba(122, 75, 40, 0.38),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+  .btn-gloss:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .tile {
+    animation: pop 0.45s cubic-bezier(0.2, 1.35, 0.4, 1) both;
+  }
+  .rise {
+    animation: rise 0.5s ease both;
+  }
+  .timer-hot {
+    animation: pulse 0.7s ease-in-out infinite;
+  }
+}
+
+@keyframes drift {
+  from { background-position: 0% 0%; }
+  to { background-position: 100% 40%; }
+}
+@keyframes sheen {
+  0%, 55% { transform: translateX(-130%); }
+  100% { transform: translateX(130%); }
+}
+@keyframes pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pulse {
+  50% { transform: scale(1.06); }
 }
 
 @media (prefers-reduced-motion: reduce) {

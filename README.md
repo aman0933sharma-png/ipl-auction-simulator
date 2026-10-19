@@ -1,4 +1,4 @@
-# Gavel
+# IPL Auction
 
 Cricket mega auction for 2–10 owners on different phones.
 
@@ -7,4 +7,4 @@ Cricket mega auction for 2–10 owners on different phones.
 3. When both names show in the lobby, the host presses **Start auction**.
 4. Each phone bids only for its own team. Squad cap is 25. Overseas cap is 8. Purse is ₹120 Cr.
 
-This is a full app, not a single HTML file. Both phones must open the deployed site (same server), not the old raw HTML.
+Both phones must open the deployed site, not a raw HTML file.

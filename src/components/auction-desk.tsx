@@ -38,7 +38,8 @@ function CodeTiles({ value }: { value: string }) {
       {chars.map((ch, i) => (
         <span
           key={`${ch}-${i}`}
-          className="flex h-14 w-11 items-center justify-center rounded-xl border border-line bg-raised font-display text-3xl font-bold tracking-wide text-gold tabular-nums"
+          style={{ animationDelay: `${i * 60}ms` }}
+          className="tile flex h-16 w-12 items-center justify-center rounded-2xl border border-white/80 bg-white/80 font-display text-3xl font-extrabold tracking-wide text-gold shadow-[0_10px_24px_rgba(122,75,40,0.18)]"
         >
           {ch}
         </span>
@@ -154,7 +155,7 @@ export function AuctionDesk() {
 
   if (!room || room.phase === "lobby") {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-8">
+      <main className="rise mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-8">
         <Header />
         {room ? (
           <Lobby
@@ -202,10 +203,12 @@ function Header() {
   return (
     <header className="mb-8 flex items-end justify-between gap-4">
       <div>
-        <p className="font-display text-sm tracking-[0.28em] text-primary">MEGA AUCTION</p>
-        <h1 className="font-display text-5xl font-bold leading-none text-fg">Gavel</h1>
+        <p className="font-display text-sm tracking-[0.32em] text-primary">MEGA AUCTION</p>
+        <h1 className="font-display text-5xl font-extrabold leading-none text-fg">IPL Auction</h1>
       </div>
-      <Gavel className="size-10 text-gold" aria-hidden="true" />
+      <span className="glass sheen grid size-14 place-items-center rounded-2xl">
+        <Gavel className="size-7 text-primary" aria-hidden="true" />
+      </span>
     </header>
   );
 }
@@ -225,8 +228,8 @@ function Gate(props: {
   onEnter: () => void;
 }) {
   return (
-    <section className="rounded-3xl border border-line bg-surface p-5 sm:p-8">
-      <div className="mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-bg p-1">
+    <section className="glass sheen rise rounded-[28px] p-5 sm:p-8">
+      <div className="relative mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-raised/80 p-1">
         {(
           [
             ["host", "Room banao"],
@@ -239,7 +242,7 @@ function Gate(props: {
             onClick={() => props.setMode(id)}
             className={
               props.mode === id
-                ? "min-h-11 rounded-xl bg-primary px-3 font-medium text-bg"
+                ? "btn-gloss min-h-11 rounded-xl px-3 font-semibold"
                 : "min-h-11 rounded-xl px-3 font-medium text-muted"
             }
           >
@@ -267,13 +270,13 @@ function Gate(props: {
           autoComplete="off"
           spellCheck={false}
           placeholder="IPL7"
-          className="min-h-12 w-full rounded-xl border border-line bg-bg px-4 font-display text-2xl tracking-[0.2em] text-gold outline-none focus:border-primary"
+          className="min-h-12 w-full rounded-2xl border border-line bg-white/80 px-4 font-display text-2xl tracking-[0.2em] text-gold shadow-inner outline-none focus:border-primary"
         />
         {props.mode === "host" ? (
           <button
             type="button"
             onClick={props.onRandom}
-            className="min-h-12 shrink-0 rounded-xl border border-line bg-raised px-4 text-sm text-fg"
+            className="min-h-12 shrink-0 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
           >
             Random
           </button>
@@ -291,7 +294,7 @@ function Gate(props: {
         type="button"
         disabled={props.busy}
         onClick={props.onEnter}
-        className="mt-6 min-h-12 w-full rounded-xl bg-primary px-4 font-semibold text-bg disabled:opacity-50"
+        className="btn-gloss mt-6 min-h-12 w-full rounded-2xl px-4 font-semibold disabled:opacity-50"
       >
         {props.busy ? "Ruk jao..." : props.mode === "host" ? "Room banao" : "Join room"}
       </button>
@@ -314,7 +317,7 @@ function Field(props: {
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         placeholder={props.placeholder}
-        className="mt-2 min-h-12 w-full rounded-xl border border-line bg-bg px-4 text-base text-fg outline-none focus:border-primary"
+        className="mt-2 min-h-12 w-full rounded-2xl border border-line bg-white/80 px-4 text-base text-fg outline-none focus:border-primary"
       />
     </label>
   );
@@ -338,7 +341,7 @@ function Lobby(props: {
       : "Sab ready. Auction ab start ho sakti hai.";
 
   return (
-    <section className="rounded-3xl border border-line bg-surface p-5 sm:p-8">
+    <section className="glass sheen rise rounded-[28px] p-5 sm:p-8">
       <p className="text-center text-sm text-muted">Room code</p>
       <div className="mt-3">
         <CodeTiles value={props.room.code} />
@@ -346,7 +349,7 @@ function Lobby(props: {
       <button
         type="button"
         onClick={props.onCopy}
-        className="mx-auto mt-4 flex min-h-11 items-center gap-2 rounded-xl border border-line bg-raised px-4 text-sm text-fg"
+        className="relative mx-auto mt-4 flex min-h-11 items-center gap-2 rounded-2xl border border-line bg-white px-4 text-sm font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
       >
         <Copy className="size-4" aria-hidden="true" />
         {props.copied ? "Copy ho gaya" : "Code copy karo"}
@@ -358,7 +361,7 @@ function Lobby(props: {
       </div>
       <ul className="mt-3 grid gap-2">
         {props.room.players.map((p, i) => (
-          <li key={p.id} className="flex items-center justify-between rounded-2xl border border-line bg-bg px-4 py-3">
+          <li key={p.id} className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(122,75,40,0.1)]">
             <div>
               <p className="font-medium text-fg">{p.team}</p>
               <p className="text-sm text-muted">{p.name}</p>
@@ -377,7 +380,7 @@ function Lobby(props: {
         type="button"
         disabled={!isHost || !ready || props.busy}
         onClick={props.onStart}
-        className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-bg disabled:opacity-40"
+        className="btn-gloss mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-4 font-semibold disabled:opacity-40"
       >
         <Play className="size-4" aria-hidden="true" />
         Start auction
@@ -408,28 +411,28 @@ function Board(props: {
   }, [lot, props.room.bid, props.room.leaderId, props.room.phase]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-6">
+    <main className="rise mx-auto min-h-screen w-full max-w-5xl px-4 py-6">
       <header className="mb-5 flex items-center justify-between">
         <div>
           <p className="font-display tracking-[0.22em] text-primary">ROOM {props.room.code}</p>
-          <h1 className="font-display text-4xl font-bold">Gavel</h1>
+          <h1 className="font-display text-4xl font-extrabold">IPL Auction</h1>
         </div>
-        <p className="text-sm text-muted">{me ? me.team : "Watching"}</p>
+        <p className="text-sm font-medium text-muted">{me ? me.team : "Watching"}</p>
       </header>
 
       {props.room.phase === "done" || !lot ? (
-        <section className="rounded-3xl border border-line bg-surface p-8 text-center">
+        <section className="glass rise rounded-[28px] p-8 text-center">
           <h2 className="font-display text-4xl">Auction complete</h2>
           <p className="mt-2 text-muted">{props.room.commentary}</p>
         </section>
       ) : (
-        <section className="rounded-3xl border border-line bg-surface p-6 text-center sm:p-10">
+        <section className="glass sheen rise rounded-[28px] p-6 text-center sm:p-10">
           <p className="text-sm tracking-widest text-muted">NOW BIDDING</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
           </p>
-          <p className={`mt-4 font-display text-6xl tabular-nums ${left <= 5 ? "text-primary" : "text-gold"}`}>
+          <p className={`relative mt-4 font-display text-7xl font-extrabold tabular-nums ${left <= 5 ? "timer-hot text-primary" : "text-gold"}`}>
             {left}
           </p>
           <p className="mt-2 font-display text-3xl text-fg">
@@ -444,7 +447,7 @@ function Board(props: {
               type="button"
               onClick={props.onBid}
               disabled={full}
-              className="mt-6 min-h-14 w-full max-w-sm rounded-2xl bg-primary px-4 font-semibold text-bg disabled:opacity-40"
+              className="btn-gloss relative mt-6 min-h-14 w-full max-w-sm rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
             >
               {full ? "Squad full 25/25" : `Bid ${nextLabel}`}
             </button>
@@ -457,14 +460,14 @@ function Board(props: {
               <button
                 type="button"
                 onClick={() => props.onClose("sell")}
-                className="min-h-11 rounded-xl bg-gold px-4 font-semibold text-bg"
+                className="btn-gloss min-h-11 rounded-xl px-5 font-semibold"
               >
                 Sell
               </button>
               <button
                 type="button"
                 onClick={() => props.onClose("unsold")}
-                className="min-h-11 rounded-xl border border-line bg-raised px-4 text-fg"
+                className="min-h-11 rounded-xl border border-line bg-white px-5 font-medium text-fg shadow-[0_8px_18px_rgba(122,75,40,0.14)]"
               >
                 Unsold
               </button>
@@ -476,7 +479,7 @@ function Board(props: {
       <h3 className="mt-8 font-display text-2xl">Teams</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         {props.room.players.map((p) => (
-          <article key={p.id} className="rounded-2xl border border-line bg-surface p-4">
+          <article key={p.id} className="glass rise rounded-3xl p-4">
             <div className="flex items-baseline justify-between gap-2">
               <h4 className="font-display text-2xl">{p.team}</h4>
               <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
