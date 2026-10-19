@@ -181,10 +181,8 @@ export function passLot(state: RoomState, playerId: string, now: number): RoomSt
     endsAt: now + BID_MS,
     commentary: `${me.team} ne pass kiya.`,
   };
-  const othersPassed =
-    Boolean(next.leaderId) &&
-    next.players.every((p) => p.id === next.leaderId || next.passed.includes(p.id));
-  if (!othersPassed) return next;
+  const allPassed = next.players.every((p) => p.id === next.leaderId || next.passed.includes(p.id));
+  if (!allPassed) return next;
   return resolveDue({ ...next, endsAt: now }, now);
 }
 
