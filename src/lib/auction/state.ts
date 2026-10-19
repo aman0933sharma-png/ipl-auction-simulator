@@ -1,11 +1,8 @@
 import {
   BID_MS,
-  LOTS,
-  MAX_OVERSEAS,
   MAX_PLAYERS,
-  MAX_SQUAD,
-  PURSE,
-  STEP,
+  getKind,
+  type AuctionKind,
   type Lot,
 } from "./catalog";
 
@@ -24,6 +21,7 @@ export type Phase = "lobby" | "live" | "done";
 export type RoomState = {
   code: string;
   hostId: string;
+  kind: AuctionKind;
   phase: Phase;
   players: Seat[];
   index: number;
@@ -35,10 +33,11 @@ export type RoomState = {
   feed: string[];
 };
 
-export function freshRoom(code: string, host: Seat): RoomState {
+export function freshRoom(code: string, host: Seat, kind: AuctionKind = "ipl"): RoomState {
   return {
     code,
     hostId: host.id,
+    kind,
     phase: "lobby",
     players: [host],
     index: 0,
@@ -51,12 +50,16 @@ export function freshRoom(code: string, host: Seat): RoomState {
   };
 }
 
-export function seat(id: string, name: string, team: string): Seat {
-  return { id, name: name.trim(), team: team.trim(), purse: PURSE, squad: [] };
+export function seat(id: string, name: string, team: string, purse = getKind("ipl").purse): Seat {
+  return { id, name: name.trim(), team: team.trim(), purse, squad: [] };
 }
 
-function overseas(s: Seat): number {
-  return s.squad.filter((p) => p.country !== "India").length;
+function rules(state: RoomState) {
+  return getKind(state.kind);
+}
+
+function lotAt(state: RoomState) {
+  return rules(state).lots[state.index];
 }
 
 function pushFeed(state: RoomState, line: string): string[] {
@@ -64,7 +67,7 @@ function pushFeed(state: RoomState, line: string): string[] {
 }
 
 function openLot(state: RoomState, now: number): RoomState {
-  const lot = LOTS[state.index];
+  const lot = lotAt(state);
   if (!lot) {
     return {
       ...state,
@@ -88,7 +91,7 @@ function openLot(state: RoomState, now: number): RoomState {
 export function resolveDue(state: RoomState, now: number): RoomState {
   if (state.phase !== "live") return state;
   if (now < state.endsAt) return state;
-  const lot = LOTS[state.index];
+  const lot = lotAt(state);
   if (!lot) return { ...state, phase: "done", commentary: "Auction khatam." };
 
   let next = state;
@@ -141,13 +144,17 @@ export function placeBid(state: RoomState, playerId: string, now: number): RoomS
   if (settled.phase !== "live") throw new Error("Is lot pe bid band ho chuki hai.");
   const me = settled.players.find((p) => p.id === playerId);
   if (!me) throw new Error("Tum is room mein nahi ho.");
-  if (me.squad.length >= MAX_SQUAD) throw new Error(`${me.team} ke 25 players poore ho gaye.`);
-  const lot = LOTS[settled.index];
-  if (!lot) throw new Error("Koi player nahi bacha.");
-  if (lot.country !== "India" && overseas(me) >= MAX_OVERSEAS) {
-    throw new Error(`${me.team} ke 8 overseas players ho chuke hain.`);
+  const rule = rules(settled);
+  if (me.squad.length >= rule.maxItems) {
+    throw new Error(`${me.team} ke ${rule.maxItems} ${rule.item} poore ho gaye.`);
   }
-  const nextBid = settled.leaderId === null ? lot.base : settled.bid + STEP;
+  const lot = lotAt(settled);
+  if (!lot) throw new Error("Koi lot nahi bacha.");
+  if (rule.overseas != null && lot.country !== "India") {
+    const foreign = me.squad.filter((p) => p.country !== "India").length;
+    if (foreign >= rule.overseas) throw new Error(`${me.team} ke ${rule.overseas} overseas players ho chuke hain.`);
+  }
+  const nextBid = settled.leaderId === null ? lot.base : settled.bid + rule.step;
   if (settled.leaderId === playerId) throw new Error("Tum pehle se leading ho.");
   if (me.purse < nextBid) throw new Error("Purse kam pad raha hai.");
   return {

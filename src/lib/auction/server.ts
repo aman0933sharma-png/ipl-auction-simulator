@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { addPlayer, beginAuction, forceClose, freshRoom, passLot, placeBid, resolveDue, seat, type RoomState } from "./state";
+import { getKind, type AuctionKind } from "./catalog";
 
 const codeSchema = z
   .string()
@@ -16,6 +17,7 @@ const joinSchema = z.object({
   playerId: idSchema,
   name: label,
   team: label,
+  kind: z.enum(["ipl", "cars", "bikes"]).optional(),
 });
 
 const actSchema = z.object({
@@ -101,13 +103,16 @@ export const createRoom = createServerFn({ method: "POST" })
       const state = parseState(existing.state);
       const mine = state.players.some((p) => p.id === data.playerId);
       if (state.phase === "lobby" && (mine || state.players.length === 0)) {
-        return mutate(data.code, (s) => addPlayer(s, seat(data.playerId, data.name, data.team)));
+    return mutate(data.code, (state) =>
+      addPlayer(state, seat(data.playerId, data.name, data.team, getKind(state.kind).purse)),
+    );
       }
       if (mine) return resolveDue(state, Date.now());
       throw new Error("Ye room code pehle se use ho raha hai. Doosra code try karo.");
     }
-    const host = seat(data.playerId, data.name, data.team);
-    const state = freshRoom(data.code, host);
+    const kind = (data.kind ?? "ipl") as AuctionKind;
+    const host = seat(data.playerId, data.name, data.team, getKind(kind).purse);
+    const state = freshRoom(data.code, host, kind);
     if (sharedStore()) {
       const { insertRoom } = await import("./bus.server");
       const placed = await insertRoom(data.code, host.id, JSON.stringify(state));
@@ -142,7 +147,9 @@ export const createRoom = createServerFn({ method: "POST" })
 export const joinRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => joinSchema.parse(input))
   .handler(async ({ data }) => {
-    return mutate(data.code, (state) => addPlayer(state, seat(data.playerId, data.name, data.team)));
+    return mutate(data.code, (state) =>
+      addPlayer(state, seat(data.playerId, data.name, data.team, getKind(state.kind).purse)),
+    );
   });
 
 export const startAuction = createServerFn({ method: "POST" })

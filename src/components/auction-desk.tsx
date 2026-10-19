@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
-import { LOTS, MAX_SQUAD, formatCr, lotTitle } from "@/lib/auction/catalog";
+import { KINDS, formatCr, getKind, lotTitle, type AuctionKind } from "@/lib/auction/catalog";
 import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
 import type { RoomState } from "@/lib/auction/state";
 
@@ -54,6 +54,7 @@ export function AuctionDesk() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [team, setTeam] = useState("");
+  const [kind, setKind] = useState<AuctionKind>("ipl");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -98,7 +99,7 @@ export function AuctionDesk() {
     }
     setBusy(true);
     try {
-      const payload = { code: draft, playerId, name: name.trim(), team: team.trim() };
+      const payload = { code: draft, playerId, name: name.trim(), team: team.trim(), kind };
       const next = kind === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
@@ -156,7 +157,7 @@ export function AuctionDesk() {
   if (!room || room.phase === "lobby") {
     return (
       <main className="rise mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-8">
-        <Header />
+        <Header title={room ? getKind(room.kind).title : "Auction"} />
         {room ? (
           <Lobby
             room={room}
@@ -177,6 +178,8 @@ export function AuctionDesk() {
             setName={setName}
             team={team}
             setTeam={setTeam}
+            kind={kind}
+            setKind={setKind}
             busy={busy || !playerId}
             error={error}
             onRandom={() => setCode(randomCode())}
@@ -199,12 +202,12 @@ export function AuctionDesk() {
   );
 }
 
-function Header() {
+function Header(props: { title: string }) {
   return (
     <header className="mb-8 flex items-end justify-between gap-4">
       <div>
-        <p className="font-display text-sm tracking-[0.32em] text-primary">MEGA AUCTION</p>
-        <h1 className="font-display text-5xl font-extrabold leading-none text-fg">IPL Auction</h1>
+        <p className="font-display text-sm tracking-[0.32em] text-primary">LIVE AUCTION</p>
+        <h1 className="font-display text-5xl font-extrabold leading-none text-fg">{props.title}</h1>
       </div>
       <span className="glass sheen grid size-14 place-items-center rounded-2xl">
         <Gavel className="size-7 text-primary" aria-hidden="true" />
@@ -222,6 +225,8 @@ function Gate(props: {
   setName: (v: string) => void;
   team: string;
   setTeam: (v: string) => void;
+  kind: AuctionKind;
+  setKind: (k: AuctionKind) => void;
   busy: boolean;
   error: string;
   onRandom: () => void;
@@ -250,6 +255,28 @@ function Gate(props: {
           </button>
         ))}
       </div>
+
+      {props.mode === "host" ? (
+        <div className="mt-5 grid grid-cols-3 gap-2">
+          {KINDS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => props.setKind(item.id)}
+              className={
+                props.kind === item.id
+                  ? "btn-gloss min-h-16 rounded-2xl px-2 text-center"
+                  : "min-h-16 rounded-2xl border border-line bg-white/80 px-2 text-center"
+              }
+            >
+              <span className="block text-sm font-semibold">{item.title.replace(" Auction", "")}</span>
+              <span className="mt-1 block text-xs text-muted">{formatCr(item.purse)}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-5 text-center text-sm text-muted">Auction type host choose karega. Tum sirf code se join karo.</p>
+      )}
 
       <CodeTiles value={props.draft} />
       <p className="mt-3 text-center text-sm text-muted">
@@ -285,7 +312,13 @@ function Gate(props: {
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Field id="owner-name" label="Owner name" value={props.name} onChange={props.setName} placeholder="Aman" />
-        <Field id="team-name" label="Team name" value={props.team} onChange={props.setTeam} placeholder="Pahadi XI" />
+        <Field
+          id="team-name"
+          label={getKind(props.kind).teamLabel}
+          value={props.team}
+          onChange={props.setTeam}
+          placeholder={getKind(props.kind).teamHint}
+        />
       </div>
 
       {props.error ? <p className="mt-4 text-sm text-primary">{props.error}</p> : null}
@@ -359,6 +392,9 @@ function Lobby(props: {
         <Users className="size-4" aria-hidden="true" />
         <h2 className="font-display text-2xl text-fg">{props.room.players.length} / 10 owners</h2>
       </div>
+      <p className="mt-1 text-sm text-muted">
+        {getKind(props.room.kind).title} · purse {formatCr(getKind(props.room.kind).purse)}
+      </p>
       <ul className="mt-3 grid gap-2">
         {props.room.players.map((p, i) => (
           <li key={p.id} className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(150,170,200,0.16)]">
@@ -397,28 +433,29 @@ function Board(props: {
   onBid: () => void;
   onPass: () => void;
 }) {
-  const lot = LOTS[props.room.index];
+  const rule = getKind(props.room.kind);
+  const lot = rule.lots[props.room.index];
   const me = props.room.players.find((p) => p.id === props.playerId);
   const leader = props.room.players.find((p) => p.id === props.room.leaderId);
   const live = props.room.phase === "live" && Boolean(lot);
   const left = Math.max(0, Math.ceil((props.room.endsAt - props.now) / 1000));
-  const full = (me?.squad.length ?? 0) >= MAX_SQUAD;
+  const full = (me?.squad.length ?? 0) >= rule.maxItems;
   const passed = props.room.passed ?? [];
   const iPassed = passed.includes(props.playerId);
   const leading = props.room.leaderId === props.playerId;
 
   const nextLabel = useMemo(() => {
     if (!lot || props.room.phase !== "live") return "";
-    const amount = props.room.leaderId ? props.room.bid + 25 : lot.base;
+    const amount = props.room.leaderId ? props.room.bid + rule.step : lot.base;
     return formatCr(amount);
-  }, [lot, props.room.bid, props.room.leaderId, props.room.phase]);
+  }, [lot, props.room.bid, props.room.leaderId, props.room.phase, rule.step]);
 
   return (
     <main className="rise mx-auto min-h-screen w-full max-w-5xl px-4 py-6">
       <header className="mb-5 flex items-center justify-between">
         <div>
           <p className="font-display tracking-[0.22em] text-primary">ROOM {props.room.code}</p>
-          <h1 className="font-display text-4xl font-extrabold">IPL Auction</h1>
+          <h1 className="font-display text-4xl font-extrabold">{rule.title}</h1>
         </div>
         <div className="flex items-center gap-3">
           {live ? (
@@ -440,7 +477,7 @@ function Board(props: {
         </section>
       ) : (
         <section className="glass sheen rise rounded-[28px] p-6 text-center sm:p-10">
-          <p className="text-sm tracking-widest text-muted">{lotTitle(lot.role).toUpperCase()} LOT</p>
+          <p className="text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role).toUpperCase()} LOT</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
@@ -460,7 +497,7 @@ function Board(props: {
                 disabled={full || leading}
                 className="btn-gloss relative min-h-14 flex-1 rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
               >
-                {full ? "Squad full" : leading ? "Leading" : `Bid ${nextLabel}`}
+                {full ? "Limit full" : leading ? "Leading" : `Bid ${nextLabel}`}
               </button>
               <button
                 type="button"
@@ -488,8 +525,8 @@ function Board(props: {
                 <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
               </div>
               <p className="text-sm text-muted">
-                {p.name} · {p.squad.length}/{MAX_SQUAD}
-                {p.squad.length >= MAX_SQUAD ? " full" : ""}
+                {p.name} · {p.squad.length}/{rule.maxItems}
+                {p.squad.length >= rule.maxItems ? " full" : ""}
                 {mine ? "" : " · players hidden"}
               </p>
               {mine ? (
