@@ -72,7 +72,7 @@ export const KINDS: KindSpec[] = [
     teamLabel: "Team name",
     teamHint: "Pahadi XI",
     overseas: null,
-    bidMs: 30_000,
+    bidMs: 15_000,
     lots: PLAYERS,
   },
   {

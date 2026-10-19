@@ -4,7 +4,7 @@ const ROOT = "aman-ipl-auction/v1";
 const BROKER = "wss://broker.hivemq.com:8884/mqtt";
 
 type Envelope = { version: number; hostId: string; state: string; token: string };
-export type RoomRow = { code: string; host_id: string; version: number; state: string };
+export type RoomRow = { code: string; host_id: string; version: number; state: string; etag?: string };
 
 const rooms = new Map<string, Envelope>();
 const seen = new Set<string>();
@@ -127,8 +127,10 @@ export async function loadRoom(code: string): Promise<RoomRow | null> {
   const store = blobs();
   if (store) {
     try {
-      const env = (await store.get(code, { type: "json", consistency: "strong" })) as Envelope | null;
-      return env ? row(code, env) : null;
+      const hit = await store.getWithMetadata(code, { type: "json", consistency: "strong" });
+      if (!hit?.data) return null;
+      const env = hit.data as Envelope;
+      return { ...row(code, env), etag: hit.etag };
     } catch {
       blobStore = null;
     }
@@ -159,11 +161,16 @@ export async function saveRoom(
   expected: number,
   state: string,
   hostId: string,
+  etag?: string,
 ): Promise<boolean> {
   const env = { version: expected + 1, hostId, state, token: token() };
   const store = blobs();
   if (store) {
     try {
+      if (etag) {
+        const result = await store.setJSON(code, env, { onlyIfMatch: etag });
+        return result.modified;
+      }
       const hit = await store.getWithMetadata(code, { type: "json", consistency: "strong" });
       const current = hit?.data as Envelope | undefined;
       if (!current || current.version !== expected || !hit?.etag) return false;

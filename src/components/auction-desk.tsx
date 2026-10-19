@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
 import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
 import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
-import { freshRoom, seat, type RoomState } from "@/lib/auction/state";
+import { freshRoom, passLot, placeBid, seat, type RoomState } from "@/lib/auction/state";
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -143,31 +143,47 @@ export function AuctionDesk() {
 
   async function onBid() {
     if (!room || !playerId || actionRef.current) return;
+    const snapshot = room;
+    let optimistic: RoomState;
+    try {
+      optimistic = placeBid(room, playerId, Date.now());
+    } catch (err) {
+      setError(messageOf(err));
+      return;
+    }
     actionRef.current = true;
-    setBusy(true);
+    setRoom(optimistic);
     setError("");
     try {
       setRoom(await bid({ data: { code: room.code, playerId } }));
     } catch (err) {
+      setRoom(snapshot);
       setError(messageOf(err));
     } finally {
       actionRef.current = false;
-      setBusy(false);
     }
   }
 
   async function onPass() {
     if (!room || !playerId || actionRef.current) return;
+    const snapshot = room;
+    let optimistic: RoomState;
+    try {
+      optimistic = passLot(room, playerId, Date.now());
+    } catch (err) {
+      setError(messageOf(err));
+      return;
+    }
     actionRef.current = true;
-    setBusy(true);
+    setRoom(optimistic);
     setError("");
     try {
       setRoom(await pass({ data: { code: room.code, playerId } }));
     } catch (err) {
+      setRoom(snapshot);
       setError(messageOf(err));
     } finally {
       actionRef.current = false;
-      setBusy(false);
     }
   }
 

@@ -26,7 +26,7 @@ const actSchema = z.object({
   playerId: idSchema,
 });
 
-type Row = { code: string; host_id: string; version: number; state: string };
+type Row = { code: string; host_id: string; version: number; state: string; etag?: string };
 
 function sharedStore() {
   return !process.env.DATABASE_URL?.trim();
@@ -50,9 +50,9 @@ async function load(code: string): Promise<Row | null> {
   return rows[0] ?? null;
 }
 
-async function save(code: string, expected: number, state: RoomState): Promise<boolean> {
+async function save(code: string, expected: number, state: RoomState, etag?: string): Promise<boolean> {
   if (sharedStore()) {
-    return saveRoom(code, expected, JSON.stringify(state), state.hostId);
+    return saveRoom(code, expected, JSON.stringify(state), state.hostId, etag);
   }
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
@@ -73,7 +73,7 @@ async function mutate(code: string, change: (state: RoomState, version: number) 
     const current = resolveDue(parseState(row.state), Date.now());
     const next = change(current, row.version);
     if (JSON.stringify(next) === JSON.stringify(current)) return current;
-    const ok = await save(code, row.version, next);
+    const ok = await save(code, row.version, next, row.etag);
     if (ok) return next;
   }
   throw new Error("Room busy hai. Ek second baad try karo.");
