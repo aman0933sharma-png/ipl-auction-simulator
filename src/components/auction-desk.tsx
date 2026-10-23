@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
 import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
-import { bid, pass, createRoom, joinRoom, startAuction, syncRoom } from "@/lib/auction/server";
+import { bid, currentProfile, createRoom, joinRoom, pass, signIn, signOut, signUp, startAuction, syncRoom } from "@/lib/auction/server";
 import { freshRoom, passLot, placeBid, seat, type RoomState } from "@/lib/auction/state";
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -11,19 +11,6 @@ function randomCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
   for (const b of bytes) code += ALPHA[b % ALPHA.length];
   return code;
-}
-
-function usePlayerId() {
-  const [id, setId] = useState("");
-  useEffect(() => {
-    let stored = sessionStorage.getItem("gavel-id");
-    if (!stored || !/^[a-zA-Z0-9]{8,32}$/.test(stored)) {
-      stored = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-      sessionStorage.setItem("gavel-id", stored);
-    }
-    setId(stored);
-  }, []);
-  return id;
 }
 
 function messageOf(error: unknown) {
@@ -68,8 +55,13 @@ function CodeTiles({ value }: { value: string }) {
   );
 }
 
+type Profile = { id: string; name: string; team: string; token: string };
+
 export function AuctionDesk() {
-  const playerId = usePlayerId();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"host" | "join">("host");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -85,6 +77,24 @@ export function AuctionDesk() {
   const pullRef = useRef<() => void>(() => {});
   const kickedEnd = useRef(0);
   const holdSync = useRef(false);
+  const playerId = profile?.id ?? "";
+  const token = profile?.token ?? "";
+
+  useEffect(() => {
+    const saved = localStorage.getItem("auction-token");
+    if (!saved || !/^[a-f0-9]{48}$/.test(saved)) {
+      setAuthReady(true);
+      return;
+    }
+    currentProfile({ data: { token: saved } })
+      .then((user) => {
+        setProfile(user);
+        setName(user.name);
+        setTeam(user.team);
+      })
+      .catch(() => localStorage.removeItem("auction-token"))
+      .finally(() => setAuthReady(true));
+  }, []);
 
   function takeServer(next: RoomState) {
     const rev = next.rev ?? 0;
@@ -104,11 +114,11 @@ export function AuctionDesk() {
   }, []);
 
   useEffect(() => {
-    if (!room || !playerId) return;
+    if (!room || !token) return;
     let stop = false;
     const pull = async () => {
       try {
-        const next = await syncRoom({ data: { code: room.code, playerId } });
+        const next = await syncRoom({ data: { code: room.code, token } });
         if (stop || holdSync.current) return;
         takeServer(next);
       } catch {
@@ -119,12 +129,12 @@ export function AuctionDesk() {
       void pull();
     };
     void pull();
-    const id = window.setInterval(pull, room.phase === "lobby" ? 400 : 450);
+    const id = window.setInterval(pull, room.phase === "lobby" ? 250 : 160);
     return () => {
       stop = true;
       window.clearInterval(id);
     };
-  }, [room?.code, room?.phase, playerId]);
+  }, [room?.code, room?.phase, token]);
 
   useEffect(() => {
     if (!room || room.phase !== "live" || !room.endsAt) return;
@@ -137,24 +147,20 @@ export function AuctionDesk() {
   const draft = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 
   async function enter(action: "host" | "join") {
-    if (!playerId) return;
+    if (!profile) return;
     setError("");
     if (draft.length < 4) {
       setError("Room code kam se kam 4 characters ka hona chahiye.");
       return;
     }
-    if (name.trim().length < 2 || team.trim().length < 2) {
-      setError("Owner name aur team name dono daalo.");
-      return;
-    }
     setBusy(true);
     holdSync.current = true;
     const spec = getKind(kind);
-    const local = freshRoom(draft, seat(playerId, name.trim(), team.trim(), spec.purse), kind);
+    const local = freshRoom(draft, seat(profile.id, profile.name, profile.team, spec.purse), kind);
     setCode(draft);
     setRoom(action === "join" ? { ...local, hostId: "", commentary: "Room join ho raha hai..." } : local);
     try {
-      const payload = { code: draft, playerId, name: name.trim(), team: team.trim(), kind };
+      const payload = { code: draft, token, kind };
       const next = action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
@@ -169,11 +175,11 @@ export function AuctionDesk() {
   }
 
   async function onStart() {
-    if (!room || !playerId) return;
+    if (!room || !token) return;
     setBusy(true);
     setError("");
     try {
-      setRoom(await startAuction({ data: { code: room.code, playerId } }));
+      setRoom(await startAuction({ data: { code: room.code, token } }));
     } catch (err) {
       setError(messageOf(err));
     } finally {
@@ -182,7 +188,7 @@ export function AuctionDesk() {
   }
 
   async function onBid() {
-    if (!room || !playerId || pendingRef.current) return;
+    if (!room || !token || pendingRef.current) return;
     const live = room.phase === "live" && Date.now() < room.endsAt;
     if (live) {
       try {
@@ -196,7 +202,7 @@ export function AuctionDesk() {
       }
     }
     try {
-      const next = await withTimeout(bid({ data: { code: room.code, playerId } }));
+      const next = await withTimeout(bid({ data: { code: room.code, token } }));
       pendingRef.current = null;
       takeServer(next);
     } catch (err) {
@@ -207,7 +213,7 @@ export function AuctionDesk() {
   }
 
   async function onPass() {
-    if (!room || !playerId || pendingRef.current) return;
+    if (!room || !token || pendingRef.current) return;
     const live = room.phase === "live" && Date.now() < room.endsAt;
     if (live) {
       try {
@@ -221,7 +227,7 @@ export function AuctionDesk() {
       }
     }
     try {
-      const next = await withTimeout(pass({ data: { code: room.code, playerId } }));
+      const next = await withTimeout(pass({ data: { code: room.code, token } }));
       pendingRef.current = null;
       takeServer(next);
     } catch (err) {
@@ -240,6 +246,62 @@ export function AuctionDesk() {
     } catch {
       setError("Copy nahi hua. Code khud select karke bhej do.");
     }
+  }
+
+  async function logout() {
+    const current = profile?.token;
+    setProfile(null);
+    setRoom(null);
+    setPassword("");
+    localStorage.removeItem("auction-token");
+    if (current) void signOut({ data: { token: current } }).catch(() => undefined);
+  }
+
+  async function onAuth() {
+    setBusy(true);
+    setError("");
+    try {
+      const user =
+        authMode === "login"
+          ? await signIn({ data: { name: name.trim(), password } })
+          : await signUp({ data: { name: name.trim(), password, team: team.trim() } });
+      localStorage.setItem("auction-token", user.token);
+      setProfile(user);
+      setPassword("");
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!authReady) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center px-4">
+        <p className="text-muted">Profile khul raha hai...</p>
+      </main>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <main className="rise mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-8">
+        <Header title="Auction" />
+        <AuthScreen
+          mode={authMode}
+          setMode={setAuthMode}
+          name={name}
+          setName={setName}
+          password={password}
+          setPassword={setPassword}
+          team={team}
+          setTeam={setTeam}
+          busy={busy}
+          error={error}
+          onSubmit={onAuth}
+        />
+      </main>
+    );
   }
 
   if (!room || room.phase === "lobby") {
@@ -268,10 +330,12 @@ export function AuctionDesk() {
             setTeam={setTeam}
             kind={kind}
             setKind={setKind}
-            busy={busy || !playerId}
+            busy={busy}
             error={error}
             onRandom={() => setCode(randomCode())}
             onEnter={() => enter(mode)}
+            profile={profile}
+            onLogout={logout}
           />
         )}
       </main>
@@ -287,6 +351,7 @@ export function AuctionDesk() {
       onBid={onBid}
       onPass={onPass}
       busy={busy}
+      onLogout={logout}
     />
   );
 }
@@ -305,6 +370,70 @@ function Header(props: { title: string }) {
   );
 }
 
+function AuthScreen(props: {
+  mode: "login" | "signup";
+  setMode: (mode: "login" | "signup") => void;
+  name: string;
+  setName: (v: string) => void;
+  password: string;
+  setPassword: (v: string) => void;
+  team: string;
+  setTeam: (v: string) => void;
+  busy: boolean;
+  error: string;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="glass rounded-[28px] p-5 sm:p-8">
+      <div className="mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-raised/80 p-1">
+        {(
+          [
+            ["login", "Login"],
+            ["signup", "Sign up"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => props.setMode(id)}
+            className={props.mode === id ? "btn-gloss min-h-11 rounded-xl font-semibold" : "min-h-11 rounded-xl font-medium text-muted"}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-sm text-muted">
+        {props.mode === "login"
+          ? "Apna name aur password daalo. Team profile se aa jaayegi."
+          : "Name, password aur team name set karo. Ye profile save ho jaayegi."}
+      </p>
+      <div className="grid gap-3">
+        <Field id="auth-name" label="Name" value={props.name} onChange={props.setName} placeholder="Aman" />
+        <Field
+          id="auth-password"
+          label="Password"
+          value={props.password}
+          onChange={props.setPassword}
+          placeholder="••••"
+          type="password"
+        />
+        {props.mode === "signup" ? (
+          <Field id="auth-team" label="Team name" value={props.team} onChange={props.setTeam} placeholder="Pahadi XI" />
+        ) : null}
+      </div>
+      {props.error ? <p className="mt-4 text-sm text-primary">{props.error}</p> : null}
+      <button
+        type="button"
+        disabled={props.busy}
+        onClick={props.onSubmit}
+        className="btn-gloss mt-6 min-h-12 w-full rounded-2xl font-semibold disabled:opacity-50"
+      >
+        {props.busy ? "Ruk jao..." : props.mode === "login" ? "Login" : "Profile banao"}
+      </button>
+    </section>
+  );
+}
+
 function Gate(props: {
   mode: "host" | "join";
   setMode: (m: "host" | "join") => void;
@@ -320,6 +449,8 @@ function Gate(props: {
   error: string;
   onRandom: () => void;
   onEnter: () => void;
+  profile: Profile;
+  onLogout: () => void;
 }) {
   return (
     <section className="glass sheen rise rounded-[28px] p-5 sm:p-8">
@@ -399,16 +530,15 @@ function Gate(props: {
         ) : null}
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Field id="owner-name" label="Owner name" value={props.name} onChange={props.setName} placeholder="Aman" />
-        <Field
-          id="team-name"
-          label={getKind(props.kind).teamLabel}
-          value={props.team}
-          onChange={props.setTeam}
-          placeholder={getKind(props.kind).teamHint}
-        />
-      </div>
+      <p className="mb-4 flex items-center justify-between gap-3 text-sm">
+        <span>
+          <span className="font-semibold text-fg">{props.profile.name}</span>
+          <span className="text-muted"> · {props.profile.team}</span>
+        </span>
+        <button type="button" onClick={props.onLogout} className="text-muted underline">
+          Logout
+        </button>
+      </p>
 
       {props.error ? <p className="mt-4 text-sm text-primary">{props.error}</p> : null}
 
@@ -430,12 +560,14 @@ function Field(props: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  type?: string;
 }) {
   return (
     <label className="block text-sm text-muted" htmlFor={props.id}>
       {props.label}
       <input
         id={props.id}
+        type={props.type}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         placeholder={props.placeholder}
@@ -514,6 +646,37 @@ function Lobby(props: {
   );
 }
 
+function useLotPhoto(name: string) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    if (!name) return;
+    const ctrl = new AbortController();
+    setSrc("");
+    const title = encodeURIComponent(name.trim().replace(/ /g, "_"));
+    fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${title}`, { signal: ctrl.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const photo = data?.originalimage?.source || data?.thumbnail?.source || "";
+        setSrc(typeof photo === "string" ? photo : "");
+      })
+      .catch(() => setSrc(""));
+    return () => ctrl.abort();
+  }, [name]);
+  return src;
+}
+
+function LotPhoto(props: { name: string; tall?: boolean }) {
+  const src = useLotPhoto(props.name);
+  if (!src) {
+    return (
+      <div className={`lot-photo grid place-items-center font-display text-5xl text-gold ${props.tall ? "h-64" : "h-44"}`}>
+        {props.name.slice(0, 1)}
+      </div>
+    );
+  }
+  return <img src={src} alt="" className={`lot-photo ${props.tall ? "h-64" : "h-44"}`} />;
+}
+
 function Board(props: {
   room: RoomState;
   playerId: string;
@@ -522,6 +685,7 @@ function Board(props: {
   onBid: () => void;
   onPass: () => void;
   busy: boolean;
+  onLogout: () => void;
 }) {
   const rule = getKind(props.room.kind);
   const lot = rule.lots[props.room.index];
@@ -533,6 +697,18 @@ function Board(props: {
   const passed = props.room.passed ?? [];
   const iPassed = passed.includes(props.playerId);
   const leading = props.room.leaderId === props.playerId;
+  const [coverOn, setCoverOn] = useState(false);
+  const coverSeen = useRef("");
+
+  useEffect(() => {
+    if (props.room.phase !== "live" || !lot) return;
+    const key = `${props.room.index}:${lot.name}`;
+    if (coverSeen.current === key) return;
+    coverSeen.current = key;
+    setCoverOn(true);
+    const id = window.setTimeout(() => setCoverOn(false), 1800);
+    return () => window.clearTimeout(id);
+  }, [props.room.phase, props.room.index, lot]);
 
   const nextLabel = useMemo(() => {
     if (!lot || props.room.phase !== "live") return "";
@@ -557,6 +733,9 @@ function Board(props: {
             </div>
           ) : null}
           <p className="text-sm font-medium text-muted">{me ? me.team : "Watching"}</p>
+          <button type="button" onClick={props.onLogout} className="text-sm text-muted underline">
+            Logout
+          </button>
         </div>
       </header>
 
@@ -567,7 +746,8 @@ function Board(props: {
         </section>
       ) : (
         <section key={`${props.room.index}-${lot.name}`} className="lot-card glass rounded-[28px] p-6 text-center sm:p-10">
-          <p className="text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
+          <LotPhoto name={lot.name} />
+          <p className="mt-4 text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
@@ -603,6 +783,20 @@ function Board(props: {
           )}
         </section>
       )}
+
+      {coverOn && lot ? (
+        <button type="button" className="lot-cover" onClick={() => setCoverOn(false)}>
+          <div className="lot-cover-card">
+            <p className="text-sm tracking-[0.28em] text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
+            <h2 className="mt-2 font-display text-5xl font-extrabold">{lot.group || lot.role}</h2>
+            <div className="mt-4">
+              <LotPhoto name={lot.name} tall />
+            </div>
+            <p className="mt-4 font-display text-2xl">{lot.name}</p>
+            <p className="mt-1 text-sm text-muted">Tap karke bid screen kholo</p>
+          </div>
+        </button>
+      ) : null}
 
       <h3 className="mt-8 font-display text-2xl">Owners</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">

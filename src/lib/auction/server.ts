@@ -3,6 +3,7 @@ import { z } from "zod";
 import { addPlayer, beginAuction, forceClose, freshRoom, passLot, placeBid, resolveDue, seat, type RoomState } from "./state";
 import { getKind, type AuctionKind } from "./catalog";
 import { insertRoom, loadRoom, saveRoom } from "./bus.server";
+import { endSession, loginAccount, readSession, registerAccount } from "./accounts.server";
 
 const codeSchema = z
   .string()
@@ -10,20 +11,23 @@ const codeSchema = z
   .toUpperCase()
   .regex(/^[A-Z0-9]{4,8}$/, "Room code 4–8 letters ya numbers ka hona chahiye.");
 
-const idSchema = z.string().regex(/^[a-zA-Z0-9]{8,32}$/);
 const label = z.string().trim().min(2).max(22);
+const tokenSchema = z.string().regex(/^[a-f0-9]{48}$/);
 
 const joinSchema = z.object({
   code: codeSchema,
-  playerId: idSchema,
-  name: label,
-  team: label,
+  token: tokenSchema,
   kind: z.enum(["ipl", "cars", "bikes"]).optional(),
 });
 
 const actSchema = z.object({
   code: codeSchema,
-  playerId: idSchema,
+  token: tokenSchema,
+});
+
+const authSchema = z.object({
+  name: label,
+  password: z.string().min(4).max(40),
 });
 
 type Row = { code: string; host_id: string; version: number; state: string; etag?: string };
@@ -66,6 +70,35 @@ async function save(code: string, expected: number, state: RoomState, etag?: str
   return rows.length > 0;
 }
 
+async function owner(token: string) {
+  const user = await readSession(token);
+  if (!user) throw new Error("Login khatam ho gaya. Dubara login karo.");
+  return user;
+}
+
+export const signUp = createServerFn({ method: "POST" })
+  .validator((input: unknown) => authSchema.extend({ team: label }).parse(input))
+  .handler(async ({ data }) => registerAccount(data.name, data.password, data.team));
+
+export const signIn = createServerFn({ method: "POST" })
+  .validator((input: unknown) => authSchema.parse(input))
+  .handler(async ({ data }) => loginAccount(data.name, data.password));
+
+export const currentProfile = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: tokenSchema }).parse(input))
+  .handler(async ({ data }) => {
+    const user = await readSession(data.token);
+    if (!user) throw new Error("Login khatam ho gaya.");
+    return user;
+  });
+
+export const signOut = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: tokenSchema }).parse(input))
+  .handler(async ({ data }) => {
+    await endSession(data.token);
+    return { ok: true };
+  });
+
 async function mutate(code: string, change: (state: RoomState, version: number) => RoomState): Promise<RoomState> {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const row = await load(code);
@@ -82,6 +115,7 @@ async function mutate(code: string, change: (state: RoomState, version: number) 
 export const syncRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
+    await owner(data.token);
     const row = await load(data.code);
     if (!row) throw new Error("Room nahi mila. Code check karo.");
     const current = parseState(row.state);
@@ -97,8 +131,9 @@ export const syncRoom = createServerFn({ method: "POST" })
 export const createRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => joinSchema.parse(input))
   .handler(async ({ data }) => {
+    const user = await owner(data.token);
     const kind = (data.kind ?? "ipl") as AuctionKind;
-    const host = seat(data.playerId, data.name, data.team, getKind(kind).purse);
+    const host = seat(user.id, user.name, user.team, getKind(kind).purse);
     if (sharedStore()) {
       const placed = await insertRoom(data.code, host.id, JSON.stringify(freshRoom(data.code, host, kind)));
       if (placed === "ok") return freshRoom(data.code, host, kind);
@@ -106,11 +141,11 @@ export const createRoom = createServerFn({ method: "POST" })
     const existing = await load(data.code);
     if (existing) {
       const state = parseState(existing.state);
-      const mine = state.players.some((p) => p.id === data.playerId);
+      const mine = state.players.some((p) => p.id === user.id);
       if (state.phase === "lobby" && (mine || state.players.length === 0)) {
-    return mutate(data.code, (state) =>
-      addPlayer(state, seat(data.playerId, data.name, data.team, getKind(state.kind).purse)),
-    );
+        return mutate(data.code, (state) =>
+          addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
+        );
       }
       if (mine) return resolveDue(state, Date.now());
       throw new Error("Ye room code pehle se use ho raha hai. Doosra code try karo.");
@@ -133,7 +168,7 @@ export const createRoom = createServerFn({ method: "POST" })
       const again = await load(data.code);
       if (again) {
         const existingState = parseState(again.state);
-        if (existingState.players.some((p) => p.id === data.playerId) || existingState.phase === "lobby") {
+        if (existingState.players.some((p) => p.id === user.id) || existingState.phase === "lobby") {
           return mutate(data.code, (s) => addPlayer(s, host));
         }
       }
@@ -149,27 +184,31 @@ export const createRoom = createServerFn({ method: "POST" })
 export const joinRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => joinSchema.parse(input))
   .handler(async ({ data }) => {
+    const user = await owner(data.token);
     return mutate(data.code, (state) =>
-      addPlayer(state, seat(data.playerId, data.name, data.team, getKind(state.kind).purse)),
+      addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
     );
   });
 
 export const startAuction = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
-    return mutate(data.code, (state) => beginAuction(state, data.playerId, Date.now()));
+    const user = await owner(data.token);
+    return mutate(data.code, (state) => beginAuction(state, user.id, Date.now()));
   });
 
 export const bid = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
-    return mutate(data.code, (state) => placeBid(state, data.playerId, Date.now()));
+    const user = await owner(data.token);
+    return mutate(data.code, (state) => placeBid(state, user.id, Date.now()));
   });
 
 export const pass = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
-    return mutate(data.code, (state) => passLot(state, data.playerId, Date.now()));
+    const user = await owner(data.token);
+    return mutate(data.code, (state) => passLot(state, user.id, Date.now()));
   });
 
 export const closeLot = createServerFn({ method: "POST" })
@@ -177,5 +216,6 @@ export const closeLot = createServerFn({ method: "POST" })
     actSchema.extend({ mode: z.enum(["sell", "unsold"]) }).parse(input),
   )
   .handler(async ({ data }) => {
-    return mutate(data.code, (state) => forceClose(state, data.playerId, Date.now(), data.mode));
+    const user = await owner(data.token);
+    return mutate(data.code, (state) => forceClose(state, user.id, Date.now(), data.mode));
   });

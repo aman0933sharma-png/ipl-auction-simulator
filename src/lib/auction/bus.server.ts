@@ -8,6 +8,7 @@ export type RoomRow = { code: string; host_id: string; version: number; state: s
 
 const rooms = new Map<string, Envelope>();
 const seen = new Set<string>();
+const memoryKv = new Map<string, string>();
 let mqttClient: import("mqtt").MqttClient | null = null;
 let connecting: Promise<import("mqtt").MqttClient> | null = null;
 let connects = 0;
@@ -184,4 +185,46 @@ export async function saveRoom(
   if (!current || current.version !== expected) return false;
   await publish(code, env);
   return rooms.get(code)?.token === env.token && rooms.get(code)?.version === env.version;
+}
+
+export async function kvGet<T>(key: string): Promise<T | null> {
+  const store = blobs();
+  if (store) {
+    try {
+      const value = (await store.get(key, { type: "json", consistency: "strong" })) as T | null;
+      return value ?? null;
+    } catch {
+      blobStore = null;
+    }
+  }
+  const raw = memoryKv.get(key);
+  return raw ? (JSON.parse(raw) as T) : null;
+}
+
+export async function kvSet(key: string, value: unknown, onlyIfNew = false): Promise<boolean> {
+  const store = blobs();
+  if (store) {
+    try {
+      const result = await store.setJSON(key, value, onlyIfNew ? { onlyIfNew: true } : {});
+      return result.modified;
+    } catch {
+      blobStore = null;
+    }
+  }
+  if (onlyIfNew && memoryKv.has(key)) return false;
+  memoryKv.set(key, JSON.stringify(value));
+  return true;
+}
+
+export async function kvDel(key: string) {
+  const store = blobs();
+  if (store) {
+    try {
+      await store.delete(key);
+      return;
+    } catch {
+      blobStore = null;
+    }
+  }
+  memoryKv.delete(key);
 }
