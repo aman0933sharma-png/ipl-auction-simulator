@@ -87,7 +87,7 @@ export const syncRoom = createServerFn({ method: "POST" })
     const current = parseState(row.state);
     const next = resolveDue(current, Date.now());
     if (JSON.stringify(next) !== JSON.stringify(current)) {
-      await save(data.code, row.version, next);
+      await save(data.code, row.version, next, row.etag);
       const fresh = await load(data.code);
       return fresh ? parseState(fresh.state) : next;
     }

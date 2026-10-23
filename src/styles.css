@@ -50,11 +50,31 @@
   .btn-gloss:disabled {
     cursor: default;
   }
-  .tile,
-  .rise,
-  .timer-hot {
-    animation: none;
+  .tile {
+    animation: pop 280ms ease both;
   }
+  .lot-card {
+    animation: lot-in 280ms ease;
+  }
+  .price,
+  .timer-hot,
+  button {
+    transition: transform 140ms ease, opacity 140ms ease, color 160ms ease, background-color 160ms ease;
+  }
+  button:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  .timer-hot {
+    animation: tick 1s ease-in-out infinite;
+  }
+}
+
+@keyframes lot-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tick {
+  50% { opacity: 0.55; }
 }
 
 @keyframes drift {

@@ -35,6 +35,22 @@ function messageOf(error: unknown) {
   return "Bid nahi lagi. Ek baar aur tap karo.";
 }
 
+function withTimeout<T>(work: Promise<T>, ms = 7000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Network slow hai. Dono phones sync ho rahe hain.")), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function CodeTiles({ value }: { value: string }) {
   const chars = (value || "----").padEnd(4, "·").slice(0, 8).split("");
   return (
@@ -64,7 +80,23 @@ export function AuctionDesk() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const actionRef = useRef(false);
+  const confirmedRev = useRef(0);
+  const pendingRef = useRef<{ base: number; index: number } | null>(null);
+  const pullRef = useRef<() => void>(() => {});
+  const kickedEnd = useRef(0);
+  const holdSync = useRef(false);
+
+  function takeServer(next: RoomState) {
+    const rev = next.rev ?? 0;
+    if (rev < confirmedRev.current) return;
+    const pending = pendingRef.current;
+    if (pending && rev <= pending.base && next.index === pending.index && next.phase === "live") return;
+    confirmedRev.current = rev;
+    if (!pending || rev > pending.base || next.index !== pending.index || next.phase !== "live") {
+      pendingRef.current = null;
+    }
+    setRoom(next);
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -77,23 +109,30 @@ export function AuctionDesk() {
     const pull = async () => {
       try {
         const next = await syncRoom({ data: { code: room.code, playerId } });
-        if (stop || actionRef.current) return;
-        setRoom((current) => {
-          if (!current) return next;
-          if ((next.rev ?? 0) < (current.rev ?? 0)) return current;
-          return next;
-        });
+        if (stop || holdSync.current) return;
+        takeServer(next);
       } catch {
         /* keep last good snapshot */
       }
     };
+    pullRef.current = () => {
+      void pull();
+    };
     void pull();
-    const id = window.setInterval(pull, room.phase === "lobby" ? 350 : 800);
+    const id = window.setInterval(pull, room.phase === "lobby" ? 400 : 450);
     return () => {
       stop = true;
       window.clearInterval(id);
     };
   }, [room?.code, room?.phase, playerId]);
+
+  useEffect(() => {
+    if (!room || room.phase !== "live" || !room.endsAt) return;
+    if (now < room.endsAt) return;
+    if (kickedEnd.current === room.endsAt) return;
+    kickedEnd.current = room.endsAt;
+    pullRef.current();
+  }, [now, room?.endsAt, room?.phase]);
 
   const draft = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 
@@ -109,7 +148,7 @@ export function AuctionDesk() {
       return;
     }
     setBusy(true);
-    actionRef.current = true;
+    holdSync.current = true;
     const spec = getKind(kind);
     const local = freshRoom(draft, seat(playerId, name.trim(), team.trim(), spec.purse), kind);
     setCode(draft);
@@ -119,11 +158,12 @@ export function AuctionDesk() {
       const next = action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
+      confirmedRev.current = next.rev ?? 0;
     } catch (err) {
       setRoom(null);
       setError(messageOf(err));
     } finally {
-      actionRef.current = false;
+      holdSync.current = false;
       setBusy(false);
     }
   }
@@ -142,48 +182,52 @@ export function AuctionDesk() {
   }
 
   async function onBid() {
-    if (!room || !playerId || actionRef.current) return;
-    const snapshot = room;
-    let optimistic: RoomState;
-    try {
-      optimistic = placeBid(room, playerId, Date.now());
-    } catch (err) {
-      setError(messageOf(err));
-      return;
+    if (!room || !playerId || pendingRef.current) return;
+    const live = room.phase === "live" && Date.now() < room.endsAt;
+    if (live) {
+      try {
+        const optimistic = placeBid(room, playerId, Date.now());
+        pendingRef.current = { base: room.rev ?? 0, index: room.index };
+        if (optimistic.index === room.index) setRoom(optimistic);
+        setError("");
+      } catch (err) {
+        setError(messageOf(err));
+        return;
+      }
     }
-    actionRef.current = true;
-    setRoom(optimistic);
-    setError("");
     try {
-      setRoom(await bid({ data: { code: room.code, playerId } }));
+      const next = await withTimeout(bid({ data: { code: room.code, playerId } }));
+      pendingRef.current = null;
+      takeServer(next);
     } catch (err) {
-      setRoom(snapshot);
+      pendingRef.current = null;
       setError(messageOf(err));
-    } finally {
-      actionRef.current = false;
+      pullRef.current();
     }
   }
 
   async function onPass() {
-    if (!room || !playerId || actionRef.current) return;
-    const snapshot = room;
-    let optimistic: RoomState;
-    try {
-      optimistic = passLot(room, playerId, Date.now());
-    } catch (err) {
-      setError(messageOf(err));
-      return;
+    if (!room || !playerId || pendingRef.current) return;
+    const live = room.phase === "live" && Date.now() < room.endsAt;
+    if (live) {
+      try {
+        const optimistic = passLot(room, playerId, Date.now());
+        pendingRef.current = { base: room.rev ?? 0, index: room.index };
+        if (optimistic.index === room.index) setRoom(optimistic);
+        setError("");
+      } catch (err) {
+        setError(messageOf(err));
+        return;
+      }
     }
-    actionRef.current = true;
-    setRoom(optimistic);
-    setError("");
     try {
-      setRoom(await pass({ data: { code: room.code, playerId } }));
+      const next = await withTimeout(pass({ data: { code: room.code, playerId } }));
+      pendingRef.current = null;
+      takeServer(next);
     } catch (err) {
-      setRoom(snapshot);
+      pendingRef.current = null;
       setError(messageOf(err));
-    } finally {
-      actionRef.current = false;
+      pullRef.current();
     }
   }
 
@@ -522,13 +566,13 @@ function Board(props: {
           <p className="mt-2 text-muted">{props.room.commentary}</p>
         </section>
       ) : (
-        <section className="glass sheen rise rounded-[28px] p-6 text-center sm:p-10">
+        <section key={`${props.room.index}-${lot.name}`} className="lot-card glass rounded-[28px] p-6 text-center sm:p-10">
           <p className="text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
           </p>
-          <p className="mt-4 font-display text-3xl text-fg">
+          <p className="price mt-4 font-display text-3xl text-fg">
             {formatCr(props.room.bid)}
             <span className="ml-2 text-base text-muted">{leader ? leader.team : "koi bid nahi"}</span>
           </p>
