@@ -1,6 +1,8 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { kvDel, kvGet, kvSet } from "./bus.server";
+import type { Desk, SavedItem } from "./library";
+import type { RoomState } from "./state";
 
 const scryptAsync = promisify(scrypt);
 const DAY = 24 * 60 * 60 * 1000;
@@ -76,4 +78,45 @@ export async function readSession(token: string): Promise<PublicProfile | null> 
 
 export async function endSession(token: string) {
   if (/^[a-f0-9]{48}$/.test(token)) await kvDel(sessKey(token));
+}
+
+function libKey(userId: string) {
+  return `lib-${userId}`;
+}
+
+export async function readDesk(userId: string): Promise<Desk> {
+  return (await kvGet<Desk>(libKey(userId))) ?? { open: [], squads: [] };
+}
+
+export async function saveLibrary(userId: string, state: RoomState) {
+  const me = state.players.find((player) => player.id === userId);
+  if (!me) return;
+  const desk = await readDesk(userId);
+  if (state.phase === "done") {
+    const items: SavedItem[] = me.squad.map((item) => ({
+      name: item.name,
+      country: item.country,
+      role: item.role,
+      group: item.group,
+      soldFor: item.soldFor,
+    }));
+    desk.open = desk.open.filter((auction) => auction.code !== state.code);
+    desk.squads = [
+      {
+        code: state.code,
+        kind: state.kind,
+        team: me.team,
+        finishedAt: Date.now(),
+        purse: me.purse,
+        items,
+      },
+      ...desk.squads.filter((squad) => squad.code !== state.code),
+    ].slice(0, 20);
+  } else {
+    desk.open = [
+      { code: state.code, kind: state.kind, phase: state.phase, updatedAt: Date.now() },
+      ...desk.open.filter((auction) => auction.code !== state.code),
+    ].slice(0, 8);
+  }
+  await kvSet(libKey(userId), desk);
 }

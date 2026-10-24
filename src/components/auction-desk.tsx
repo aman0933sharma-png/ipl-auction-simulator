@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
 import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
-import { bid, currentProfile, createRoom, joinRoom, pass, signIn, signOut, signUp, startAuction, syncRoom } from "@/lib/auction/server";
+import { bid, currentProfile, createRoom, joinRoom, myDesk, pass, signIn, signOut, signUp, startAuction, syncRoom } from "@/lib/auction/server";
 import { freshRoom, passLot, placeBid, seat, type RoomState } from "@/lib/auction/state";
+import type { Desk } from "@/lib/auction/library";
+import { downloadSquadPdf } from "@/lib/auction/squad-pdf";
 
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -71,6 +73,7 @@ export function AuctionDesk() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [desk, setDesk] = useState<Desk>({ open: [], squads: [] });
   const [now, setNow] = useState(() => Date.now());
   const confirmedRev = useRef(0);
   const pendingRef = useRef<{ base: number; index: number } | null>(null);
@@ -135,6 +138,13 @@ export function AuctionDesk() {
       window.clearInterval(id);
     };
   }, [room?.code, room?.phase, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    myDesk({ data: { token } })
+      .then(setDesk)
+      .catch(() => undefined);
+  }, [token, room?.code, room?.phase]);
 
   useEffect(() => {
     if (!room || room.phase !== "live" || !room.endsAt) return;
@@ -237,6 +247,24 @@ export function AuctionDesk() {
     }
   }
 
+  async function resume(savedCode: string) {
+    if (!profile) return;
+    setError("");
+    setBusy(true);
+    holdSync.current = true;
+    try {
+      const next = await joinRoom({ data: { code: savedCode, token: profile.token } });
+      setRoom(next);
+      setCode(next.code);
+      confirmedRev.current = next.rev ?? 0;
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      holdSync.current = false;
+      setBusy(false);
+    }
+  }
+
   async function copyCode() {
     if (!room) return;
     try {
@@ -319,24 +347,27 @@ export function AuctionDesk() {
             onCopy={copyCode}
           />
         ) : (
-          <Gate
-            mode={mode}
-            setMode={setMode}
-            draft={draft}
-            setCode={setCode}
-            name={name}
-            setName={setName}
-            team={team}
-            setTeam={setTeam}
-            kind={kind}
-            setKind={setKind}
-            busy={busy}
-            error={error}
-            onRandom={() => setCode(randomCode())}
-            onEnter={() => enter(mode)}
-            profile={profile}
-            onLogout={logout}
-          />
+          <>
+            <SavedPanel desk={desk} busy={busy} onResume={resume} />
+            <Gate
+              mode={mode}
+              setMode={setMode}
+              draft={draft}
+              setCode={setCode}
+              name={name}
+              setName={setName}
+              team={team}
+              setTeam={setTeam}
+              kind={kind}
+              setKind={setKind}
+              busy={busy}
+              error={error}
+              onRandom={() => setCode(randomCode())}
+              onEnter={() => enter(mode)}
+              profile={profile}
+              onLogout={logout}
+            />
+          </>
         )}
       </main>
     );
@@ -352,7 +383,60 @@ export function AuctionDesk() {
       onPass={onPass}
       busy={busy}
       onLogout={logout}
+      onHome={() => setRoom(null)}
     />
+  );
+}
+
+function SavedPanel(props: { desk: Desk; busy: boolean; onResume: (code: string) => void }) {
+  if (props.desk.open.length === 0 && props.desk.squads.length === 0) return null;
+  return (
+    <section className="mb-4 grid gap-3">
+      {props.desk.open.length > 0 ? (
+        <div className="glass rounded-[28px] p-5">
+          <p className="font-display text-2xl">Purani auction</p>
+          <p className="mt-1 text-sm text-muted">Phone band karne ke baad yahi se resume karo, ya neeche nayi shuru karo.</p>
+          <div className="mt-3 grid gap-2">
+            {props.desk.open.map((auction) => (
+              <button
+                key={auction.code}
+                type="button"
+                disabled={props.busy}
+                onClick={() => props.onResume(auction.code)}
+                className="flex min-h-12 items-center justify-between rounded-2xl border border-line bg-white px-4 text-left"
+              >
+                <span className="font-semibold">
+                  {auction.code} · {auction.kind}
+                </span>
+                <span className="text-sm text-gold">{auction.phase === "live" ? "Resume" : "Lobby"}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {props.desk.squads.length > 0 ? (
+        <div className="glass rounded-[28px] p-5">
+          <p className="font-display text-2xl">Saved squads</p>
+          <div className="mt-3 grid gap-2">
+            {props.desk.squads.map((squad) => (
+              <div key={`${squad.code}-${squad.finishedAt}`} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white px-4 py-3">
+                <div>
+                  <p className="font-semibold">
+                    {squad.team} · {squad.code}
+                  </p>
+                  <p className="text-sm text-muted">
+                    {squad.kind} · {squad.items.length} lots · {formatCr(squad.purse)} left
+                  </p>
+                </div>
+                <button type="button" onClick={() => downloadSquadPdf(squad)} className="btn-gloss min-h-10 rounded-xl px-3 text-sm font-semibold">
+                  PDF
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -686,6 +770,7 @@ function Board(props: {
   onPass: () => void;
   busy: boolean;
   onLogout: () => void;
+  onHome: () => void;
 }) {
   const rule = getKind(props.room.kind);
   const lot = rule.lots[props.room.index];
@@ -743,6 +828,35 @@ function Board(props: {
         <section className="glass rise rounded-[28px] p-8 text-center">
           <h2 className="font-display text-4xl">Auction complete</h2>
           <p className="mt-2 text-muted">{props.room.commentary}</p>
+          <div className="mx-auto mt-6 flex max-w-sm flex-col gap-2">
+            {me ? (
+              <button
+                type="button"
+                onClick={() =>
+                  downloadSquadPdf({
+                    code: props.room.code,
+                    kind: props.room.kind,
+                    team: me.team,
+                    finishedAt: Date.now(),
+                    purse: me.purse,
+                    items: me.squad.map((item) => ({
+                      name: item.name,
+                      country: item.country,
+                      role: item.role,
+                      group: item.group,
+                      soldFor: item.soldFor,
+                    })),
+                  })
+                }
+                className="btn-gloss min-h-12 rounded-2xl font-semibold"
+              >
+                Squad PDF
+              </button>
+            ) : null}
+            <button type="button" onClick={props.onHome} className="min-h-12 rounded-2xl border border-line bg-white font-semibold">
+              Nayi auction
+            </button>
+          </div>
         </section>
       ) : (
         <section key={`${props.room.index}-${lot.name}`} className="lot-card glass rounded-[28px] p-6 text-center sm:p-10">

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { addPlayer, beginAuction, forceClose, freshRoom, passLot, placeBid, resolveDue, seat, type RoomState } from "./state";
 import { getKind, type AuctionKind } from "./catalog";
 import { insertRoom, loadRoom, saveRoom } from "./bus.server";
-import { endSession, loginAccount, readSession, registerAccount } from "./accounts.server";
+import { endSession, loginAccount, readDesk, readSession, registerAccount, saveLibrary } from "./accounts.server";
 
 const codeSchema = z
   .string()
@@ -76,6 +76,15 @@ async function owner(token: string) {
   return user;
 }
 
+async function keep(userId: string, state: RoomState) {
+  try {
+    await saveLibrary(userId, state);
+  } catch {
+    /* room still plays if the profile save misses */
+  }
+  return state;
+}
+
 export const signUp = createServerFn({ method: "POST" })
   .validator((input: unknown) => authSchema.extend({ team: label }).parse(input))
   .handler(async ({ data }) => registerAccount(data.name, data.password, data.team));
@@ -90,6 +99,13 @@ export const currentProfile = createServerFn({ method: "POST" })
     const user = await readSession(data.token);
     if (!user) throw new Error("Login khatam ho gaya.");
     return user;
+  });
+
+export const myDesk = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ token: tokenSchema }).parse(input))
+  .handler(async ({ data }) => {
+    const user = await owner(data.token);
+    return readDesk(user.id);
   });
 
 export const signOut = createServerFn({ method: "POST" })
@@ -115,7 +131,7 @@ async function mutate(code: string, change: (state: RoomState, version: number) 
 export const syncRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
-    await owner(data.token);
+    const user = await owner(data.token);
     const row = await load(data.code);
     if (!row) throw new Error("Room nahi mila. Code check karo.");
     const current = parseState(row.state);
@@ -123,7 +139,7 @@ export const syncRoom = createServerFn({ method: "POST" })
     if (JSON.stringify(next) !== JSON.stringify(current)) {
       await save(data.code, row.version, next, row.etag);
       const fresh = await load(data.code);
-      return fresh ? parseState(fresh.state) : next;
+      return keep(user.id, fresh ? parseState(fresh.state) : next);
     }
     return current;
   });
@@ -136,25 +152,28 @@ export const createRoom = createServerFn({ method: "POST" })
     const host = seat(user.id, user.name, user.team, getKind(kind).purse);
     if (sharedStore()) {
       const placed = await insertRoom(data.code, host.id, JSON.stringify(freshRoom(data.code, host, kind)));
-      if (placed === "ok") return freshRoom(data.code, host, kind);
+      if (placed === "ok") return keep(user.id, freshRoom(data.code, host, kind));
     }
     const existing = await load(data.code);
     if (existing) {
       const state = parseState(existing.state);
       const mine = state.players.some((p) => p.id === user.id);
       if (state.phase === "lobby" && (mine || state.players.length === 0)) {
-        return mutate(data.code, (state) =>
-          addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
+        return keep(
+          user.id,
+          await mutate(data.code, (state) =>
+            addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
+          ),
         );
       }
-      if (mine) return resolveDue(state, Date.now());
+      if (mine) return keep(user.id, resolveDue(state, Date.now()));
       throw new Error("Ye room code pehle se use ho raha hai. Doosra code try karo.");
     }
     const state = freshRoom(data.code, host, kind);
     if (sharedStore()) {
       const placed = await insertRoom(data.code, host.id, JSON.stringify(state));
-      if (placed === "ok") return state;
-      return mutate(data.code, (s) => addPlayer(s, host));
+      if (placed === "ok") return keep(user.id, state);
+      return keep(user.id, await mutate(data.code, (s) => addPlayer(s, host)));
     }
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
@@ -169,7 +188,7 @@ export const createRoom = createServerFn({ method: "POST" })
       if (again) {
         const existingState = parseState(again.state);
         if (existingState.players.some((p) => p.id === user.id) || existingState.phase === "lobby") {
-          return mutate(data.code, (s) => addPlayer(s, host));
+          return keep(user.id, await mutate(data.code, (s) => addPlayer(s, host)));
         }
       }
       const detail = error instanceof Error ? error.message : "";
@@ -178,15 +197,18 @@ export const createRoom = createServerFn({ method: "POST" })
       }
       throw new Error(detail || "Room nahi bana. Dubara try karo.");
     }
-    return state;
+    return keep(user.id, state);
   });
 
 export const joinRoom = createServerFn({ method: "POST" })
   .validator((input: unknown) => joinSchema.parse(input))
   .handler(async ({ data }) => {
     const user = await owner(data.token);
-    return mutate(data.code, (state) =>
-      addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
+    return keep(
+      user.id,
+      await mutate(data.code, (state) =>
+        addPlayer(state, seat(user.id, user.name, user.team, getKind(state.kind).purse)),
+      ),
     );
   });
 
@@ -194,21 +216,21 @@ export const startAuction = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
     const user = await owner(data.token);
-    return mutate(data.code, (state) => beginAuction(state, user.id, Date.now()));
+    return keep(user.id, await mutate(data.code, (state) => beginAuction(state, user.id, Date.now())));
   });
 
 export const bid = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
     const user = await owner(data.token);
-    return mutate(data.code, (state) => placeBid(state, user.id, Date.now()));
+    return keep(user.id, await mutate(data.code, (state) => placeBid(state, user.id, Date.now())));
   });
 
 export const pass = createServerFn({ method: "POST" })
   .validator((input: unknown) => actSchema.parse(input))
   .handler(async ({ data }) => {
     const user = await owner(data.token);
-    return mutate(data.code, (state) => passLot(state, user.id, Date.now()));
+    return keep(user.id, await mutate(data.code, (state) => passLot(state, user.id, Date.now())));
   });
 
 export const closeLot = createServerFn({ method: "POST" })
@@ -217,5 +239,5 @@ export const closeLot = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const user = await owner(data.token);
-    return mutate(data.code, (state) => forceClose(state, user.id, Date.now(), data.mode));
+    return keep(user.id, await mutate(data.code, (state) => forceClose(state, user.id, Date.now(), data.mode)));
   });
