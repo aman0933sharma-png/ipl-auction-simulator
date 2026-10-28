@@ -12,14 +12,10 @@ export type Lot = {
   base: number;
 };
 
-export const PURSE = 12000;
-export const STEP = 25;
-export const MAX_SQUAD = 25;
-export const MAX_OVERSEAS = 8;
-export const BID_MS = 30_000;
-export const EXTEND_MS = 30_000;
-export const MIN_PLAYERS = 2;
+/** Owners per room. */
 export const MAX_PLAYERS = 10;
+/** New accounts need 6+ characters. Older accounts made with 4–5 can still log in. */
+export const MIN_NEW_PASSWORD = 6;
 
 export function formatCr(lakh: number): string {
   return `₹${(lakh / 100).toFixed(2)} Cr`;

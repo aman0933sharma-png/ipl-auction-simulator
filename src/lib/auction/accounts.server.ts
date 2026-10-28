@@ -1,11 +1,21 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { kvDel, kvGet, kvSet } from "./bus.server";
+import { MIN_NEW_PASSWORD } from "./catalog";
 import type { Desk, SavedItem } from "./library";
 import type { RoomState } from "./state";
 
 const scryptAsync = promisify(scrypt);
 const DAY = 24 * 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+
+/** After this many wrong passwords in a row, the name is locked for LOCK_MS. */
+const MAX_FAILS = 5;
+const LOCK_MS = 10 * MINUTE;
+/** Failures older than this are forgotten. */
+const FAIL_WINDOW_MS = 15 * MINUTE;
+
+type FailRecord = { count: number; first: number; lockedUntil: number };
 
 type Account = { id: string; name: string; team: string; salt: string; hash: string };
 type Session = { id: string; name: string; team: string; exp: number };
@@ -18,6 +28,36 @@ function slug(name: string) {
 
 function acctKey(name: string) {
   return `acct-${Buffer.from(slug(name)).toString("hex").slice(0, 80)}`;
+}
+
+function failKey(name: string) {
+  return `fail-${Buffer.from(slug(name)).toString("hex").slice(0, 80)}`;
+}
+
+async function readFails(name: string): Promise<FailRecord | null> {
+  const rec = await kvGet<FailRecord>(failKey(name));
+  if (!rec) return null;
+  if (rec.lockedUntil <= Date.now() && Date.now() - rec.first > FAIL_WINDOW_MS) return null;
+  return rec;
+}
+
+async function noteFail(name: string) {
+  const now = Date.now();
+  const prev = await readFails(name);
+  // A lock that already ran out starts a fresh count.
+  const carry = prev && !(prev.lockedUntil > 0 && prev.lockedUntil <= now) ? prev : null;
+  const count = (carry?.count ?? 0) + 1;
+  const rec: FailRecord = {
+    count,
+    first: carry?.first ?? now,
+    lockedUntil: count >= MAX_FAILS ? now + LOCK_MS : 0,
+  };
+  await kvSet(failKey(name), rec);
+}
+
+function lockMessage(until: number) {
+  const mins = Math.max(1, Math.ceil((until - Date.now()) / MINUTE));
+  return `Bahut baar galat password. ${mins} minute baad try karo.`;
 }
 
 function sessKey(token: string) {
@@ -38,7 +78,9 @@ export async function registerAccount(name: string, password: string, team: stri
   const crew = team.trim();
   if (clean.length < 2 || clean.length > 22) throw new Error("Name 2 se 22 letters ka hona chahiye.");
   if (crew.length < 2 || crew.length > 22) throw new Error("Team name 2 se 22 letters ka hona chahiye.");
-  if (password.length < 4 || password.length > 40) throw new Error("Password kam se kam 4 characters ka hona chahiye.");
+  if (password.length < MIN_NEW_PASSWORD || password.length > 40) {
+    throw new Error(`Password kam se kam ${MIN_NEW_PASSWORD} characters ka hona chahiye.`);
+  }
   const salt = randomBytes(16).toString("hex");
   const account: Account = {
     id: newId(),
@@ -53,12 +95,21 @@ export async function registerAccount(name: string, password: string, team: stri
 }
 
 export async function loginAccount(name: string, password: string): Promise<PublicProfile> {
+  const fails = await readFails(name);
+  if (fails && fails.lockedUntil > Date.now()) throw new Error(lockMessage(fails.lockedUntil));
   const account = await kvGet<Account>(acctKey(name));
-  if (!account) throw new Error("Name ya password galat hai.");
+  if (!account) {
+    await noteFail(name);
+    throw new Error("Name ya password galat hai.");
+  }
   const hash = await hashPassword(password, account.salt);
   const a = Buffer.from(hash, "hex");
   const b = Buffer.from(account.hash, "hex");
-  if (a.length !== b.length || !timingSafeEqual(a, b)) throw new Error("Name ya password galat hai.");
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    await noteFail(name);
+    throw new Error("Name ya password galat hai.");
+  }
+  if (fails) await kvDel(failKey(name));
   return openSession(account);
 }
 

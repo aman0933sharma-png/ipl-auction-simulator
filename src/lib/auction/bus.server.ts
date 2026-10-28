@@ -1,160 +1,83 @@
 import { getStore, type Store } from "@netlify/blobs";
 
-const ROOT = "aman-ipl-auction/v1";
-const BROKER = "wss://broker.hivemq.com:8884/mqtt";
-
 type Envelope = { version: number; hostId: string; state: string; token: string };
 export type RoomRow = { code: string; host_id: string; version: number; state: string; etag?: string };
 
-const rooms = new Map<string, Envelope>();
-const seen = new Set<string>();
+/**
+ * Storage for rooms, accounts, sessions and saved auctions.
+ *
+ * On Netlify (and under `netlify dev`) everything lives in Netlify Blobs. A single
+ * failed Blobs call is retried and then surfaced as an error; it never switches the
+ * instance to another backend. The in-memory store below is used ONLY when no Blobs
+ * environment exists at all (plain `vite dev` on a laptop), so local development
+ * still works. Room state is never published to any public broker.
+ */
+const memoryRooms = new Map<string, { env: Envelope; etag: string }>();
 const memoryKv = new Map<string, string>();
-let mqttClient: import("mqtt").MqttClient | null = null;
-let connecting: Promise<import("mqtt").MqttClient> | null = null;
-let connects = 0;
 let blobStore: Store | null | undefined;
-
-function topic(code: string) {
-  return `${ROOT}/${code}`;
-}
+let etagSeq = 0;
+let warnedNoEtag = false;
 
 function token() {
   return Math.random().toString(16).slice(2, 12);
 }
 
-function row(code: string, env: Envelope): RoomRow {
-  return { code, host_id: env.hostId, version: env.version, state: env.state };
+function row(code: string, env: Envelope, etag?: string): RoomRow {
+  return { code, host_id: env.hostId, version: env.version, state: env.state, etag };
 }
 
+/** Returns the Blobs store, or null when this process has no Blobs environment. */
 function blobs(): Store | null {
   if (blobStore !== undefined) return blobStore;
   try {
     blobStore = getStore({ name: "auction-rooms", consistency: "strong" });
-  } catch {
+  } catch (error) {
+    if (process.env.NETLIFY || process.env.NETLIFY_BLOBS_CONTEXT) {
+      // On Netlify, a missing Blobs environment is a real failure: do not fall back.
+      throw error;
+    }
     blobStore = null;
   }
   return blobStore;
 }
 
-function remember(name: string, payload: Buffer): Envelope | null {
-  if (!name.startsWith(`${ROOT}/`)) return null;
-  const code = name.slice(ROOT.length + 1);
-  if (!code || code.includes("/")) return null;
-  if (!payload.length) {
-    rooms.delete(code);
-    return null;
-  }
-  try {
-    const env = JSON.parse(payload.toString()) as Envelope;
-    if (!env || typeof env.version !== "number" || typeof env.state !== "string") return null;
-    rooms.set(code, env);
-    return env;
-  } catch {
-    return null;
-  }
-}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function broker() {
-  if (mqttClient?.connected) return mqttClient;
-  if (connecting) return connecting;
-  connecting = (async () => {
-    const mqtt = (await import("mqtt")).default;
-    const next = mqtt.connect(BROKER, {
-      protocolVersion: 5,
-      clientId: `ipl${Math.random().toString(16).slice(2, 12)}`,
-      connectTimeout: 4000,
-      reconnectPeriod: 1000,
-      keepalive: 20,
-    });
-    return new Promise<import("mqtt").MqttClient>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        next.end(true);
-        connecting = null;
-        mqttClient = null;
-        reject(new Error("Auction network timeout"));
-      }, 4000);
-      next.on("message", (name, payload) => {
-        remember(name, payload);
-      });
-      next.on("connect", () => {
-        connects += 1;
-        if (connects > 1) seen.clear();
-        clearTimeout(timer);
-        mqttClient = next;
-        connecting = null;
-        resolve(next);
-      });
-      next.on("error", () => {
-        /* mqtt.js reconnects */
-      });
-      next.on("close", () => {
-        if (mqttClient === next && !next.connected) mqttClient = null;
-      });
-    });
-  })();
-  return connecting;
-}
-
-async function pull(code: string): Promise<Envelope | null> {
-  const live = await broker();
-  if (seen.has(code) && live.connected) return rooms.get(code) ?? null;
-  const name = topic(code);
-  await new Promise<void>((resolve, reject) => {
-    live.subscribe(name, { qos: 0 }, (err) => (err ? reject(err) : resolve()));
-  });
-  const started = Date.now();
-  while (!rooms.has(code) && Date.now() - started < 120) {
-    await new Promise((resolve) => setTimeout(resolve, 12));
+async function retry<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      last = error;
+      if (i < attempts - 1) await sleep(80 * 2 ** i);
+    }
   }
-  seen.add(code);
-  return rooms.get(code) ?? null;
-}
-
-async function publish(code: string, env: Envelope) {
-  const live = await broker();
-  await new Promise<void>((resolve, reject) => {
-    live.publish(
-      topic(code),
-      JSON.stringify(env),
-      { qos: 0, retain: true, properties: { messageExpiryInterval: 60 * 60 * 6 } },
-      (err) => (err ? reject(err) : resolve()),
-    );
-  });
-  const current = rooms.get(code);
-  if (!current || current.version <= env.version) rooms.set(code, env);
+  console.error("[auction] Blobs call failed after retries", last);
+  throw new Error("Server storage abhi slow hai. Ek second baad try karo.");
 }
 
 export async function loadRoom(code: string): Promise<RoomRow | null> {
   const store = blobs();
   if (store) {
-    try {
-      const hit = await store.getWithMetadata(code, { type: "json", consistency: "strong" });
-      if (!hit?.data) return null;
-      const env = hit.data as Envelope;
-      return { ...row(code, env), etag: hit.etag };
-    } catch {
-      blobStore = null;
-    }
+    const hit = await retry(() => store.getWithMetadata(code, { type: "json", consistency: "strong" }));
+    if (!hit?.data) return null;
+    return row(code, hit.data as Envelope, hit.etag);
   }
-  const env = await pull(code);
-  return env ? row(code, env) : null;
+  const mem = memoryRooms.get(code);
+  return mem ? row(code, mem.env, mem.etag) : null;
 }
 
 export async function insertRoom(code: string, hostId: string, state: string): Promise<"ok" | "taken"> {
-  const env = { version: 1, hostId, state, token: token() };
+  const env: Envelope = { version: 1, hostId, state, token: token() };
   const store = blobs();
   if (store) {
-    try {
-      const result = await store.setJSON(code, env, { onlyIfNew: true });
-      return result.modified ? "ok" : "taken";
-    } catch {
-      blobStore = null;
-    }
+    const result = await retry(() => store.setJSON(code, env, { onlyIfNew: true }));
+    return result.modified ? "ok" : "taken";
   }
-  const existing = await pull(code);
-  if (existing) return "taken";
-  await publish(code, env);
-  return rooms.get(code)?.token === env.token ? "ok" : "taken";
+  if (memoryRooms.has(code)) return "taken";
+  memoryRooms.set(code, { env, etag: `m${++etagSeq}` });
+  return "ok";
 }
 
 export async function saveRoom(
@@ -164,38 +87,41 @@ export async function saveRoom(
   hostId: string,
   etag?: string,
 ): Promise<boolean> {
-  const env = { version: expected + 1, hostId, state, token: token() };
+  const env: Envelope = { version: expected + 1, hostId, state, token: token() };
   const store = blobs();
   if (store) {
-    try {
-      if (etag) {
-        const result = await store.setJSON(code, env, { onlyIfMatch: etag });
-        return result.modified;
-      }
-      const hit = await store.getWithMetadata(code, { type: "json", consistency: "strong" });
+    let match = etag;
+    if (!match) {
+      const hit = await retry(() => store.getWithMetadata(code, { type: "json", consistency: "strong" }));
       const current = hit?.data as Envelope | undefined;
-      if (!current || current.version !== expected || !hit?.etag) return false;
-      const result = await store.setJSON(code, env, { onlyIfMatch: hit.etag });
-      return result.modified;
-    } catch {
-      blobStore = null;
+      if (!current || current.version !== expected) return false;
+      match = hit?.etag;
     }
+    if (!match) {
+      // The local `netlify dev` Blobs sandbox returns no etag on reads, so a
+      // compare-and-swap is impossible there. Deployed Blobs always return one.
+      if (!warnedNoEtag) {
+        warnedNoEtag = true;
+        console.warn("[auction] Blobs returned no etag; using version-checked write (local sandbox only)");
+      }
+      await retry(() => store.setJSON(code, env));
+      return true;
+    }
+    const ifMatch = match;
+    const result = await retry(() => store.setJSON(code, env, { onlyIfMatch: ifMatch }));
+    return result.modified;
   }
-  const current = await pull(code);
-  if (!current || current.version !== expected) return false;
-  await publish(code, env);
-  return rooms.get(code)?.token === env.token && rooms.get(code)?.version === env.version;
+  const mem = memoryRooms.get(code);
+  if (!mem || mem.env.version !== expected || (etag && mem.etag !== etag)) return false;
+  memoryRooms.set(code, { env, etag: `m${++etagSeq}` });
+  return true;
 }
 
 export async function kvGet<T>(key: string): Promise<T | null> {
   const store = blobs();
   if (store) {
-    try {
-      const value = (await store.get(key, { type: "json", consistency: "strong" })) as T | null;
-      return value ?? null;
-    } catch {
-      blobStore = null;
-    }
+    const value = (await retry(() => store.get(key, { type: "json", consistency: "strong" }))) as T | null;
+    return value ?? null;
   }
   const raw = memoryKv.get(key);
   return raw ? (JSON.parse(raw) as T) : null;
@@ -204,12 +130,8 @@ export async function kvGet<T>(key: string): Promise<T | null> {
 export async function kvSet(key: string, value: unknown, onlyIfNew = false): Promise<boolean> {
   const store = blobs();
   if (store) {
-    try {
-      const result = await store.setJSON(key, value, onlyIfNew ? { onlyIfNew: true } : {});
-      return result.modified;
-    } catch {
-      blobStore = null;
-    }
+    const result = await retry(() => store.setJSON(key, value, onlyIfNew ? { onlyIfNew: true } : {}));
+    return result.modified;
   }
   if (onlyIfNew && memoryKv.has(key)) return false;
   memoryKv.set(key, JSON.stringify(value));
@@ -219,12 +141,8 @@ export async function kvSet(key: string, value: unknown, onlyIfNew = false): Pro
 export async function kvDel(key: string) {
   const store = blobs();
   if (store) {
-    try {
-      await store.delete(key);
-      return;
-    } catch {
-      blobStore = null;
-    }
+    await retry(() => store.delete(key));
+    return;
   }
   memoryKv.delete(key);
 }
