@@ -1,8 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Gavel, Play, Users } from "lucide-react";
-import { KINDS, formatCr, getKind, lotTitle, squadCount, type AuctionKind } from "@/lib/auction/catalog";
-import { bid, currentProfile, createRoom, joinRoom, myDesk, pass, signIn, signOut, signUp, startAuction, syncRoom } from "@/lib/auction/server";
-import { freshRoom, passLot, placeBid, seat, type RoomState } from "@/lib/auction/state";
+import {
+  KINDS,
+  MIN_NEW_PASSWORD,
+  formatCr,
+  getKind,
+  lotTitle,
+  type AuctionKind,
+} from "@/lib/auction/catalog";
+import {
+  bid,
+  closeLot,
+  currentProfile,
+  createRoom,
+  joinRoom,
+  myDesk,
+  pass,
+  signIn,
+  signOut,
+  signUp,
+  startAuction,
+  syncRoom,
+} from "@/lib/auction/server";
+import {
+  blockReason,
+  freshRoom,
+  passLot,
+  placeBid,
+  seat,
+  squadFull,
+  type RoomState,
+  type Seat,
+} from "@/lib/auction/state";
+import { Results } from "@/components/auction-results";
 import type { Desk } from "@/lib/auction/library";
 import { downloadSquadPdf } from "@/lib/auction/squad-pdf";
 
@@ -26,7 +56,10 @@ function messageOf(error: unknown) {
 
 function withTimeout<T>(work: Promise<T>, ms = 7000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Network slow hai. Dono phones sync ho rahe hain.")), ms);
+    const timer = setTimeout(
+      () => reject(new Error("Network slow hai. Dono phones sync ho rahe hain.")),
+      ms,
+    );
     work.then(
       (value) => {
         clearTimeout(timer);
@@ -103,7 +136,8 @@ export function AuctionDesk() {
     const rev = next.rev ?? 0;
     if (rev < confirmedRev.current) return;
     const pending = pendingRef.current;
-    if (pending && rev <= pending.base && next.index === pending.index && next.phase === "live") return;
+    if (pending && rev <= pending.base && next.index === pending.index && next.phase === "live")
+      return;
     confirmedRev.current = rev;
     if (!pending || rev > pending.base || next.index !== pending.index || next.phase !== "live") {
       pendingRef.current = null;
@@ -132,7 +166,12 @@ export function AuctionDesk() {
       void pull();
     };
     void pull();
-    const id = window.setInterval(pull, room.phase === "lobby" ? 250 : 160);
+    // ~1s while bidding, ~2s in the lobby. Own actions update instantly from the
+    // server reply, and the timer-expiry effect below pulls right when a lot ends.
+    const id = window.setInterval(
+      pull,
+      room.phase === "lobby" ? 2000 : room.phase === "done" ? 5000 : 1000,
+    );
     return () => {
       stop = true;
       window.clearInterval(id);
@@ -154,7 +193,10 @@ export function AuctionDesk() {
     pullRef.current();
   }, [now, room?.endsAt, room?.phase]);
 
-  const draft = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  const draft = code
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8);
 
   async function enter(action: "host" | "join") {
     if (!profile) return;
@@ -168,10 +210,13 @@ export function AuctionDesk() {
     const spec = getKind(kind);
     const local = freshRoom(draft, seat(profile.id, profile.name, profile.team, spec.purse), kind);
     setCode(draft);
-    setRoom(action === "join" ? { ...local, hostId: "", commentary: "Room join ho raha hai..." } : local);
+    setRoom(
+      action === "join" ? { ...local, hostId: "", commentary: "Room join ho raha hai..." } : local,
+    );
     try {
       const payload = { code: draft, token, kind };
-      const next = action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
+      const next =
+        action === "host" ? await createRoom({ data: payload }) : await joinRoom({ data: payload });
       setRoom(next);
       setCode(next.code);
       confirmedRev.current = next.rev ?? 0;
@@ -200,19 +245,23 @@ export function AuctionDesk() {
   async function onBid() {
     if (!room || !token || pendingRef.current) return;
     const live = room.phase === "live" && Date.now() < room.endsAt;
-    if (live) {
-      try {
-        const optimistic = placeBid(room, playerId, Date.now());
-        pendingRef.current = { base: room.rev ?? 0, index: room.index };
-        if (optimistic.index === room.index) setRoom(optimistic);
-        setError("");
-      } catch (err) {
-        setError(messageOf(err));
-        return;
-      }
+    if (!live) {
+      setError("Time khatam. Is lot pe bid band ho gayi.");
+      pullRef.current();
+      return;
+    }
+    const index = room.index;
+    try {
+      const optimistic = placeBid(room, playerId, Date.now(), index);
+      pendingRef.current = { base: room.rev ?? 0, index: room.index };
+      if (optimistic.index === room.index) setRoom(optimistic);
+      setError("");
+    } catch (err) {
+      setError(messageOf(err));
+      return;
     }
     try {
-      const next = await withTimeout(bid({ data: { code: room.code, token } }));
+      const next = await withTimeout(bid({ data: { code: room.code, token, index } }));
       pendingRef.current = null;
       takeServer(next);
     } catch (err) {
@@ -225,25 +274,45 @@ export function AuctionDesk() {
   async function onPass() {
     if (!room || !token || pendingRef.current) return;
     const live = room.phase === "live" && Date.now() < room.endsAt;
-    if (live) {
-      try {
-        const optimistic = passLot(room, playerId, Date.now());
-        pendingRef.current = { base: room.rev ?? 0, index: room.index };
-        if (optimistic.index === room.index) setRoom(optimistic);
-        setError("");
-      } catch (err) {
-        setError(messageOf(err));
-        return;
-      }
+    if (!live) {
+      pullRef.current();
+      return;
+    }
+    const index = room.index;
+    try {
+      const optimistic = passLot(room, playerId, Date.now(), index);
+      pendingRef.current = { base: room.rev ?? 0, index: room.index };
+      if (optimistic.index === room.index) setRoom(optimistic);
+      setError("");
+    } catch (err) {
+      setError(messageOf(err));
+      return;
     }
     try {
-      const next = await withTimeout(pass({ data: { code: room.code, token } }));
+      const next = await withTimeout(pass({ data: { code: room.code, token, index } }));
       pendingRef.current = null;
       takeServer(next);
     } catch (err) {
       pendingRef.current = null;
       setError(messageOf(err));
       pullRef.current();
+    }
+  }
+
+  async function onClose(mode: "sell" | "unsold") {
+    if (!room || !token || room.phase !== "live") return;
+    setBusy(true);
+    setError("");
+    try {
+      const next = await withTimeout(
+        closeLot({ data: { code: room.code, token, index: room.index, mode } }),
+      );
+      takeServer(next);
+    } catch (err) {
+      setError(messageOf(err));
+      pullRef.current();
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -286,8 +355,12 @@ export function AuctionDesk() {
   }
 
   async function onAuth() {
-    setBusy(true);
     setError("");
+    if (authMode === "signup" && password.length < MIN_NEW_PASSWORD) {
+      setError(`Password kam se kam ${MIN_NEW_PASSWORD} characters ka hona chahiye.`);
+      return;
+    }
+    setBusy(true);
     try {
       const user =
         authMode === "login"
@@ -381,6 +454,7 @@ export function AuctionDesk() {
       error={error}
       onBid={onBid}
       onPass={onPass}
+      onClose={onClose}
       busy={busy}
       onLogout={logout}
       onHome={() => setRoom(null)}
@@ -395,7 +469,9 @@ function SavedPanel(props: { desk: Desk; busy: boolean; onResume: (code: string)
       {props.desk.open.length > 0 ? (
         <div className="glass rounded-[28px] p-5">
           <p className="font-display text-2xl">Purani auction</p>
-          <p className="mt-1 text-sm text-muted">Phone band karne ke baad yahi se resume karo, ya neeche nayi shuru karo.</p>
+          <p className="mt-1 text-sm text-muted">
+            Phone band karne ke baad yahi se resume karo, ya neeche nayi shuru karo.
+          </p>
           <div className="mt-3 grid gap-2">
             {props.desk.open.map((auction) => (
               <button
@@ -408,7 +484,9 @@ function SavedPanel(props: { desk: Desk; busy: boolean; onResume: (code: string)
                 <span className="font-semibold">
                   {auction.code} · {auction.kind}
                 </span>
-                <span className="text-sm text-gold">{auction.phase === "live" ? "Resume" : "Lobby"}</span>
+                <span className="text-sm text-gold">
+                  {auction.phase === "live" ? "Resume" : "Lobby"}
+                </span>
               </button>
             ))}
           </div>
@@ -419,7 +497,10 @@ function SavedPanel(props: { desk: Desk; busy: boolean; onResume: (code: string)
           <p className="font-display text-2xl">Saved squads</p>
           <div className="mt-3 grid gap-2">
             {props.desk.squads.map((squad) => (
-              <div key={`${squad.code}-${squad.finishedAt}`} className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white px-4 py-3">
+              <div
+                key={`${squad.code}-${squad.finishedAt}`}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white px-4 py-3"
+              >
                 <div>
                   <p className="font-semibold">
                     {squad.team} · {squad.code}
@@ -428,7 +509,11 @@ function SavedPanel(props: { desk: Desk; busy: boolean; onResume: (code: string)
                     {squad.kind} · {squad.items.length} lots · {formatCr(squad.purse)} left
                   </p>
                 </div>
-                <button type="button" onClick={() => downloadSquadPdf(squad)} className="btn-gloss min-h-10 rounded-xl px-3 text-sm font-semibold">
+                <button
+                  type="button"
+                  onClick={() => downloadSquadPdf(squad)}
+                  className="btn-gloss min-h-10 rounded-xl px-3 text-sm font-semibold"
+                >
                   PDF
                 </button>
               </div>
@@ -480,7 +565,11 @@ function AuthScreen(props: {
             key={id}
             type="button"
             onClick={() => props.setMode(id)}
-            className={props.mode === id ? "btn-gloss min-h-11 rounded-xl font-semibold" : "min-h-11 rounded-xl font-medium text-muted"}
+            className={
+              props.mode === id
+                ? "btn-gloss min-h-11 rounded-xl font-semibold"
+                : "min-h-11 rounded-xl font-medium text-muted"
+            }
           >
             {label}
           </button>
@@ -492,17 +581,31 @@ function AuthScreen(props: {
           : "Name, password aur team name set karo. Ye profile save ho jaayegi."}
       </p>
       <div className="grid gap-3">
-        <Field id="auth-name" label="Name" value={props.name} onChange={props.setName} placeholder="Aman" />
+        <Field
+          id="auth-name"
+          label="Name"
+          value={props.name}
+          onChange={props.setName}
+          placeholder="Aman"
+        />
         <Field
           id="auth-password"
           label="Password"
           value={props.password}
           onChange={props.setPassword}
-          placeholder="••••"
+          placeholder={
+            props.mode === "signup" ? `Kam se kam ${MIN_NEW_PASSWORD} characters` : "••••••"
+          }
           type="password"
         />
         {props.mode === "signup" ? (
-          <Field id="auth-team" label="Team name" value={props.team} onChange={props.setTeam} placeholder="Pahadi XI" />
+          <Field
+            id="auth-team"
+            label="Team name"
+            value={props.team}
+            onChange={props.setTeam}
+            placeholder="Pahadi XI"
+          />
         ) : null}
       </div>
       {props.error ? <p className="mt-4 text-sm text-primary">{props.error}</p> : null}
@@ -573,13 +676,17 @@ function Gate(props: {
                   : "min-h-16 rounded-2xl border border-line bg-white/80 px-2 text-center"
               }
             >
-              <span className="block text-sm font-semibold">{item.title.replace(" Auction", "")}</span>
+              <span className="block text-sm font-semibold">
+                {item.title.replace(" Auction", "")}
+              </span>
               <span className="mt-1 block text-xs text-muted">{formatCr(item.purse)}</span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="mt-5 text-center text-sm text-muted">Auction type host choose karega. Tum sirf code se join karo.</p>
+        <p className="mt-5 text-center text-sm text-muted">
+          Auction type host choose karega. Tum sirf code se join karo.
+        </p>
       )}
 
       <CodeTiles value={props.draft} />
@@ -702,7 +809,10 @@ function Lobby(props: {
       </p>
       <ul className="mt-3 grid gap-2">
         {props.room.players.map((p, i) => (
-          <li key={p.id} className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(150,170,200,0.16)]">
+          <li
+            key={p.id}
+            className="rise flex items-center justify-between rounded-2xl border border-white bg-white/70 px-4 py-3 shadow-[0_8px_18px_rgba(150,170,200,0.16)]"
+          >
             <div>
               <p className="font-medium text-fg">{p.team}</p>
               <p className="text-sm text-muted">{p.name}</p>
@@ -753,7 +863,9 @@ function LotPhoto(props: { name: string; tall?: boolean }) {
   const src = useLotPhoto(props.name);
   if (!src) {
     return (
-      <div className={`lot-photo grid place-items-center font-display text-5xl text-gold ${props.tall ? "h-64" : "h-44"}`}>
+      <div
+        className={`lot-photo grid place-items-center font-display text-5xl text-gold ${props.tall ? "h-64" : "h-44"}`}
+      >
         {props.name.slice(0, 1)}
       </div>
     );
@@ -768,6 +880,7 @@ function Board(props: {
   error: string;
   onBid: () => void;
   onPass: () => void;
+  onClose: (mode: "sell" | "unsold") => void;
   busy: boolean;
   onLogout: () => void;
   onHome: () => void;
@@ -778,10 +891,16 @@ function Board(props: {
   const leader = props.room.players.find((p) => p.id === props.room.leaderId);
   const live = props.room.phase === "live" && Boolean(lot);
   const left = Math.max(0, Math.ceil((props.room.endsAt - props.now) / 1000));
-  const full = lot ? squadCount(me?.squad ?? [], lot, props.room.kind) >= rule.maxItems : false;
+  const nextAmount = lot ? (props.room.leaderId ? props.room.bid + rule.step : lot.base) : 0;
+  const leadingNow = props.room.leaderId === props.playerId;
+  const blocked = lot && me && !leadingNow ? blockReason(props.room, me, lot, nextAmount) : null;
+  const full = Boolean(blocked);
+  const allFull = me ? squadFull(props.room, me) : false;
   const passed = props.room.passed ?? [];
   const iPassed = passed.includes(props.playerId);
   const leading = props.room.leaderId === props.playerId;
+  const timeUp = live && left <= 0;
+  const isHost = props.room.hostId === props.playerId;
   const [coverOn, setCoverOn] = useState(false);
   const coverSeen = useRef("");
 
@@ -800,6 +919,22 @@ function Board(props: {
     const amount = props.room.leaderId ? props.room.bid + rule.step : lot.base;
     return formatCr(amount);
   }, [lot, props.room.bid, props.room.leaderId, props.room.phase, rule.step]);
+
+  const pdfFor = (owner: Seat) =>
+    downloadSquadPdf({
+      code: props.room.code,
+      kind: props.room.kind,
+      team: owner.team,
+      finishedAt: Date.now(),
+      purse: owner.purse,
+      items: owner.squad.map((item) => ({
+        name: item.name,
+        country: item.country,
+        role: item.role,
+        group: item.group,
+        soldFor: item.soldFor,
+      })),
+    });
 
   return (
     <main className="rise mx-auto min-h-screen w-full max-w-5xl px-4 py-6">
@@ -825,83 +960,98 @@ function Board(props: {
       </header>
 
       {props.room.phase === "done" || !lot ? (
-        <section className="glass rise rounded-[28px] p-8 text-center">
-          <h2 className="font-display text-4xl">Auction complete</h2>
-          <p className="mt-2 text-muted">{props.room.commentary}</p>
-          <div className="mx-auto mt-6 flex max-w-sm flex-col gap-2">
-            {me ? (
-              <button
-                type="button"
-                onClick={() =>
-                  downloadSquadPdf({
-                    code: props.room.code,
-                    kind: props.room.kind,
-                    team: me.team,
-                    finishedAt: Date.now(),
-                    purse: me.purse,
-                    items: me.squad.map((item) => ({
-                      name: item.name,
-                      country: item.country,
-                      role: item.role,
-                      group: item.group,
-                      soldFor: item.soldFor,
-                    })),
-                  })
-                }
-                className="btn-gloss min-h-12 rounded-2xl font-semibold"
-              >
-                Squad PDF
-              </button>
-            ) : null}
-            <button type="button" onClick={props.onHome} className="min-h-12 rounded-2xl border border-line bg-white font-semibold">
-              Nayi auction
-            </button>
-          </div>
-        </section>
+        <Results room={props.room} playerId={props.playerId} onPdf={pdfFor} onHome={props.onHome} />
       ) : (
-        <section key={`${props.room.index}-${lot.name}`} className="lot-card glass rounded-[28px] p-6 text-center sm:p-10">
+        <section
+          key={`${props.room.index}-${lot.name}`}
+          className="lot-card glass rounded-[28px] p-6 text-center sm:p-10"
+        >
           <LotPhoto name={lot.name} />
-          <p className="mt-4 text-sm tracking-widest text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
+          <p className="mt-4 text-sm tracking-widest text-muted">
+            {lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT
+          </p>
           <h2 className="mt-2 font-display text-5xl font-bold">{lot.name}</h2>
           <p className="mt-2 text-muted">
             {lot.country} · {lot.role} · Base {formatCr(lot.base)}
           </p>
           <p className="price mt-4 font-display text-3xl text-fg">
             {formatCr(props.room.bid)}
-            <span className="ml-2 text-base text-muted">{leader ? leader.team : "koi bid nahi"}</span>
+            <span className="ml-2 text-base text-muted">
+              {leader ? leader.team : "koi bid nahi"}
+            </span>
           </p>
           <p className="mt-4 min-h-6 text-gold">{props.room.commentary}</p>
           {props.error ? <p className="mt-2 text-sm text-primary">{props.error}</p> : null}
+          {me && allFull ? (
+            <p className="mt-2 text-sm text-muted">
+              Tumhari squad full hai. Baaki teams ke full hote hi auction khatam hoke comparison
+              aayega.
+            </p>
+          ) : me && blocked ? (
+            <p className="mt-2 text-sm text-muted">{blocked} Ye lot tumhare liye skip.</p>
+          ) : null}
 
           {me ? (
             <div className="mx-auto mt-6 flex w-full max-w-sm gap-2">
               <button
                 type="button"
                 onClick={props.onBid}
-                disabled={full || leading || props.busy}
+                disabled={full || leading || timeUp || props.busy}
                 className="btn-gloss relative min-h-14 flex-1 rounded-2xl px-4 text-lg font-semibold disabled:opacity-40"
               >
-                {props.busy ? "Ruk jao..." : full ? "Limit full" : leading ? "Leading" : `Bid ${nextLabel}`}
+                {props.busy
+                  ? "Ruk jao..."
+                  : timeUp
+                    ? "Time up"
+                    : full
+                      ? blocked?.startsWith("Purse")
+                        ? "Purse kam"
+                        : "Limit full"
+                      : leading
+                        ? "Leading"
+                        : `Bid ${nextLabel}`}
               </button>
               <button
                 type="button"
                 onClick={props.onPass}
-                disabled={leading || iPassed || props.busy}
+                disabled={leading || iPassed || full || timeUp || props.busy}
                 className="min-h-14 rounded-2xl border border-line bg-white px-5 font-semibold text-fg shadow-[0_8px_18px_rgba(150,170,200,0.2)] disabled:opacity-40"
               >
-                {iPassed ? "Passed" : "Pass"}
+                {iPassed ? "Passed" : full ? "Skip" : "Pass"}
               </button>
             </div>
           ) : (
             <p className="mt-6 text-sm text-muted">Tum is room ke owner nahi ho.</p>
           )}
+          {isHost ? (
+            <div className="mx-auto mt-3 flex w-full max-w-sm gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => props.onClose("sell")}
+                disabled={!props.room.leaderId || props.busy}
+                className="min-h-11 flex-1 rounded-xl border border-line bg-white font-semibold disabled:opacity-40"
+              >
+                Host: Sold
+              </button>
+              <button
+                type="button"
+                onClick={() => props.onClose("unsold")}
+                disabled={props.busy}
+                className="min-h-11 flex-1 rounded-xl border border-line bg-white font-semibold disabled:opacity-40"
+              >
+                Host: Unsold
+              </button>
+            </div>
+          ) : null}
         </section>
       )}
 
       {coverOn && lot ? (
         <button type="button" className="lot-cover" onClick={() => setCoverOn(false)}>
           <div className="lot-cover-card">
-            <p className="text-sm tracking-[0.28em] text-muted">{lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT</p>
+            <p className="text-sm tracking-[0.28em] text-muted">
+              {lotTitle(props.room.kind, lot.role, lot.group).toUpperCase()} LOT
+            </p>
             <h2 className="mt-2 font-display text-5xl font-extrabold">{lot.group || lot.role}</h2>
             <div className="mt-4">
               <LotPhoto name={lot.name} tall />
@@ -912,54 +1062,61 @@ function Board(props: {
         </button>
       ) : null}
 
-      <h3 className="mt-8 font-display text-2xl">Owners</h3>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {props.room.players.map((p) => {
-          const mine = p.id === props.playerId;
-          return (
-            <article key={p.id} className="glass rise rounded-3xl p-4">
-              <div className="flex items-baseline justify-between gap-2">
-                <h4 className="font-display text-2xl">{p.team}</h4>
-                <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
-              </div>
-              <p className="text-sm text-muted">
-                {p.name}
-                {rule.id === "ipl" ? "" : ` · ${p.squad.length}/${rule.maxItems}`}
-                {mine ? "" : " · list hidden"}
-              </p>
-              {mine && rule.id === "ipl" ? (
-                <div className="mt-2 space-y-2 text-sm text-fg">
-                  {["Test", "ODI", "T20"].map((group) => {
-                    const picked = p.squad.filter((item) => item.group === group);
-                    return (
-                      <div key={group}>
-                        <p className="text-muted">
-                          {group} {picked.length}/{rule.maxItems}
-                        </p>
-                        {picked.map((item) => (
-                          <p key={`${group}-${item.name}`}>
-                            {item.name} · {formatCr(item.soldFor)}
-                          </p>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {mine && rule.id !== "ipl" ? (
-                <ul className="mt-2 space-y-1 text-sm text-fg">
-                  {p.squad.length === 0 ? <li className="text-muted">Abhi khaali</li> : null}
-                  {p.squad.map((s) => (
-                    <li key={s.name}>
-                      {s.name} · {formatCr(s.soldFor)}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
+      {props.room.phase === "done" || !lot ? null : (
+        <>
+          <h3 className="mt-8 font-display text-2xl">Owners</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {props.room.players.map((p) => {
+              const mine = p.id === props.playerId;
+              return (
+                <article key={p.id} className="glass rise rounded-3xl p-4">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h4 className="font-display text-2xl">{p.team}</h4>
+                    <span className="text-sm text-gold tabular-nums">{formatCr(p.purse)}</span>
+                  </div>
+                  <p className="text-sm text-muted">
+                    {p.name}
+                    {rule.id === "ipl"
+                      ? ` · ${p.squad.length}/${rule.maxItems * 3}`
+                      : ` · ${p.squad.length}/${rule.maxItems}`}
+                    {squadFull(props.room, p) ? " · FULL" : ""}
+                    {mine ? "" : " · list hidden"}
+                  </p>
+                  {mine && rule.id === "ipl" ? (
+                    <div className="mt-2 space-y-2 text-sm text-fg">
+                      {["Test", "ODI", "T20"].map((group) => {
+                        const picked = p.squad.filter((item) => item.group === group);
+                        return (
+                          <div key={group}>
+                            <p className="text-muted">
+                              {group} {picked.length}/{rule.maxItems}
+                            </p>
+                            {picked.map((item) => (
+                              <p key={`${group}-${item.name}`}>
+                                {item.name} · {formatCr(item.soldFor)}
+                              </p>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {mine && rule.id !== "ipl" ? (
+                    <ul className="mt-2 space-y-1 text-sm text-fg">
+                      {p.squad.length === 0 ? <li className="text-muted">Abhi khaali</li> : null}
+                      {p.squad.map((s) => (
+                        <li key={s.name}>
+                          {s.name} · {formatCr(s.soldFor)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
     </main>
   );
 }
